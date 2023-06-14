@@ -1,0 +1,864 @@
+output:  CHIPOS-HiRes.s19
+0001                         ;%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+0002                         ;                           C H I P O S
+0003                         ;
+0004                         ;  COMPACT HEXADECIMAL INTERPRETIVE PROGRAMMING AND OPERATING SYSTEM
+0005                         ;
+0006                         ;     DREAM-6800 OPERATING SYSTEM WITH CHIP8 LANGUAGE INTERPRETER 
+0007                         ;
+0008                         ;       ORIGINATED BY MICHAEL J BAUER, DEAKIN UNIVERSITY, 1978
+0009                         ;
+0010                         ;                  www.mjbauer.biz/DREAM6800.htm
+0011                         ;
+0012                         ;%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+0013                         ;
+0014                         ; (1) UPON RELOCATION, THE DATA AT LOC $C133
+0015                         ;     MUST BE CHANGED ACCORDINGLY (SEE RANDOM)
+0016                         ; (2) IF DISPLAY AREA MOVED, THE DATA AT LOC $C227
+0017                         ;     IS CHANGED TO HIGH-ORDER BYTE OF BUFFER ADRS.
+0018                         ;
+0019                         ; PATCHED FOR HI-RES MOD BY CRAIG JONES MAY 2023
+0020                         ; ACCORDING TO " 'HI-RES' DISPLAY MOD. M.J. BAUER "
+0021                         ; PATCHES ARE TAGGED WITH (HI-RES)
+0022                         ;
+0023                         ;
+0024                         ; SCRATCHPAD RAM ASSIGNMENTS (PAGE 0)
+0025                         ;
+0026 0000                    IRQV	EQU		$0000		; INTERRUPT VECTOR
+0027 0002                    BEGA 	EQU		$0002		; BEGIN ADRS FOR LOAD/DUMP
+0028 0004                    ENDA 	EQU		$0004		; ENDING ADRS FOR LOAD/DUMP
+0029 0006                    ADRS 	EQU		$0006		; ADRS FOR GO AND MEMOD
+0030 0008                    DDPAT 	EQU		$0008		; DIGIT PATTERN TEMP (5 BYTES)
+0031 000d                    RND		EQU		$000D		; RANDOM BYTE (SEED)
+0032 000e                    N		EQU 	$000E		; TEMP
+0033 000f                    ATEMP	EQU 	$000F		; TEMP
+0034 0012                    XTEMP 	EQU 	$0012		; 2-BYTE SAVE FOR X, SP
+0035 0014                    ZHI 	EQU 	$0014		; TEMP ADRS
+0036 0015                    ZLO		EQU		$0015		; 
+0037 0017                    KEYCOD	EQU		$0017		; KEYCODE TEMP
+0038 0018                    BADRED	EQU		$0018		; KEY BAD-READ FLAG
+0039 001c                    BLOC 	EQU		$001C		; DISPLAY POINTER (BYTE LOC'N)
+0040 001e                    PATNH 	EQU		$001E		; PATTERN TEMP
+0041 001f                    PATNL 	EQU		$001F		;
+0042 0020                    TIME 	EQU		$0020		; RTC TIMER VALUE
+0043 0021                    TONE 	EQU		$0021		; DURATION COUNT FOR TONE
+0044 0022                    PPC 	EQU		$0022		; PSEUDO PRGM-COUNTER
+0045 0024                    PSP 	EQU		$0024		; PSEUDO STACK-PTR
+0046 0026                    I		EQU		$0026		; CHIP8 MEMORY POINTER
+0047 0028                    PIR 	EQU		$0028		; PSEUDO INST-REG
+0048 002a                    VXLOC 	EQU		$002A		; POINTS TO VX
+0049 002c                    RNDX 	EQU		$002C		; RANDOM POINTER
+0050 002e                    VX		EQU		$002E		; VARIABLE X (ALSO X-COORD)
+0051 002f                    VY		EQU		$002F		; VARIABLE Y (ALSO Y-COORD)
+0052                         ;
+0053                         ; CHIP8 VARIABLES (TABLE)
+0054                         ;
+0055 0030                    VO		EQU 	$0030
+0056 003f                    VF		EQU		$003F
+0057                         ;
+0058                         ; CHIP8 SUBROUTINE STACK
+0059                         ;
+0060 005f                    STACK 	EQU 	$005F
+0061                         ;
+0062                         ; OPERATING-SYSTEM STACK
+0063                         ;
+0064 007f                    STOP 	EQU 	$007F		; STACK TOP (MONITOR)
+0065                         ;
+0066                         ; CHIP8 GRAPHIC DISPLAY AREA
+0067                         ; ( 1/4K RAM BLOCK MAPPED ONTO T.V. SCREEN BY DMA.
+0068                         ; IN FORMAT 64X32 DOTS
+0069                         ;
+0070 4000                    DISBUF	EQU		$4000		; DISPLAY BUFFER AREA (HI-RES)
+0071 4400                    ENDBUF	EQU		$4400       ; (HI-RES)
+0072 8010                    PIAA 	EQU 	$8010		; PORT-A FOR KEYPAD
+0073 8012                    PIAB 	EQU 	$8012		; PORT-B FOR TAPE, RTC, TONE
+0074                         ;
+0075                         ; CHIP8 INTERPRETER MAINLINE
+0076                         ;
+0077 c000                    		ORG 	$C000
+0078                         ;
+0079 c000 8d 77              CHIP8:	BSR		ERASE		; NORMAL ENTRY POINT
+0080 c002 ce 02 00           		LDX		#$0200		; RESET PSEUDO-PC
+0081 c005 df 22              		STX		PPC         
+0082 c007 ce 00 5f                   LDX     #STACK		; RESET   STACK PTR
+0083 c00a df 24                      STX     PSP
+0084 c00c de 22              FETCH:	LDX    	PPC			; POINT TO NEXT INSTR
+0085 c00e ee 00                      LDX     0,X			; COPY TO PIR
+0086 c010 df 28                      STX     PIR
+0087 c012 df 14                      STX     ZHI			; SAVE ADRS (MMM)
+0088 c014 bd c0 d0                   JSR		SKIP2		; BUMP PRGM-CTR
+0089 c017 96 14                      LDAA   	ZHI			; MASK OFF ADRS
+0090 c019 84 0f                      ANDA  	#$0F
+0091 c01b 97 14                      STAA   	ZHI
+0092 c01d 8d 21                      BSR     FINDV		; EXTRACT VX ALSO
+0093 c01f 97 2e                      STAA   	VX          ; STASH VX
+0094 c021 df 2a                      STX     VXLOC       ; SAVE LOCATION OF VX
+0095 c023 96 29                      LDAA   	PIR+1       ; FIND Y
+0096 c025 44                         LSRA
+0097 c026 44                         LSRA
+0098 c027 44                         LSRA   
+0099 c028 44                 		LSRA
+0100 c029 8d 15              		BSR		FINDV		; EXTRACT VY
+0101 c02b 97 2f              		STAA	VY			; STASH VY
+0102 c02d ce c0 48           EXEC:   LDX     #JUMTAB-2  	; POINT TO JUMP TABLE
+0103 c030 96 28                      LDAA   	PIR         ; EXTRACT MSD
+0104 c032 84 f0                      ANDA  	#$F0
+0105 c034 08                 EXEl:   INX					; FlND ROUTINE ADRS
+0106 c035 08                         INX
+0107 c036 80 10                      SUBA  	#$10
+0108 c038 24 fa                      BCC     EXEl      	; BRANCH IF HIGHER OR SAME
+0109 c03a ee 00                      LDX     0,X 		; LOAD ROUTINE ADRS
+0110 c03c ad 00                      JSR     0,X         ; PERFORM ROUTINE
+0111 c03e 20 cc                      BRA     FETCH       ; NEXT INSTR...
+0112 c040 ce 00 2f           FINDV:  LDX     #VO-1       ; POINT TO VARIABLES TABLE
+0113 c043 08                 FIND1:  INX                 ; FIND LOCN VX
+0114 c044 4a                         DECA
+0115 c045 2a fc                      BPL     FIND1
+0116 c047 a6 00                      LDAA    0,X         ; FETCH VX FROM TABLE
+0117 c049 39                 		RTS
+0118                         ;
+0119                         ; JUMP TABLE(ROUTINE ADDRESSES)
+0120                         ; 
+0121 c04a c0 6a              JUMTAB:	FDB     EXCALL      ; ERASE, RET, CALL, NOP
+0122 c04c c0 a2                      FDB     GOTO        ; GOTO MMM
+0123 c04e c0 ac                      FDB     DOSUB       ; DO MMM
+0124 c050 c0 ba                      FDB     SKFEK       ; SKF VX=KK
+0125 c052 c0 c1                      FDB     SKFNK       ; SKF VX#KK
+0126 c054 c0 c8                      FDB     SKFEV       ; SKF VX=VY
+0127 c056 c0 ee                      FDB     LETK        ; Vx=KK
+0128 c058 c0 f2                      FDB     LETVK       ; VX=VX+KK
+0129 c05a c0 fe                      FDB		LETVV       ; VX=[VX][+-&!]VY
+0130 c05c c0 cc                      FDB     SKFNV       ; SKF  VX#VY
+0131 c05e c0 a7                      FDB     LETI        ; I=MMM
+0132 c060 c0 97              		FDB  	GOTOV       ; GOTO MMM+VO
+0133 c062 c0 f8                      FDB     RANDV       ; VX-RND.KK
+0134 c064 c2 1f                      FDB  	SHOW        ; SHOW  N@VX, VY
+0135 c066 c0 d7                      FDB  	SKFKEY      ; SKF VX[=#]KEY
+0136 c068 c1 5f                      FDB  	MISC        ; (MINOR JUMP TABL)
+0137                         ;
+0138                         ; ERASE, RETURN, CALL (MLS), OR NOP INTRN:
+0139                         ;
+0140 c06a d6 28              EXCALL: LDAB 	PIR         ; GET INSTR REG
+0141 c06c 26 25                      BNE     CALL
+0142 c06e 96 29                      LDAA    PIR+1
+0143 c070 81 e0                      CMPA  	#$E0
+0144 c072 27 05                      BEQ     ERASE
+0145 c074 81 ee                      CMPA  	#$EE
+0146 c076 27 0e                      BEQ     RETDO
+0147 c078 39                         RTS             	; NOP, FETCH
+0148 c079 4f                 ERASE:  CLRA                ; WRITE ZEROS TO SCREEN
+0149 c07a ce 40 00                   LDX 	#DISBUF     ; POINT TO DISPLAY BUFF (HI-RES)
+0150 c07d a7 00              FILL:   STAA 	0,X         ; FILL SCREEN WITH ACC-A
+0151 c07f 08                         INX 
+0152 c080 8c 44 00                   CPX  	#ENDBUF    	; DONE? (HI-RES)
+0153 c083 26 f8                      BNE     FILL
+0154 c085 39                         RTS
+0155 c086 30                 RETDO:  TSX                 ; SAVE REAL SP
+0156 c087 9e 24                      LDS     PSP
+0157 c089 32                 		PULA
+0158 c08a 97 22                      STAA  	PPC         ; PULL PPC
+0159 c08c 32                         PULA
+0160 c08d 97 23                      STAA   	PPC+1
+0161 c08f 9f 24                      STS  	PSP         ; SAVE CHIP8 SP
+0162 c091 35                         TXS                 ; RESTORE SP
+0163 c092 39                         RTS
+0164 c093 de 14              CALL:   LDX  	ZHI         ; GET OPRND ADRS(MMM)
+0165 c095 6e 00                      JMP    	0,X         ; PERFORM MLS
+0166 c097 96 30              GOTOV:  LDAA   	VO          ; 16-BIT ADD VO TO ADRS
+0167 c099 5f                         CLRB
+0168 c09a 9b 15                      ADDA   	ZLO
+0169 c09c 97 15                      STAA    ZLO
+0170 c09e d9 14                      ADCB   	ZHI
+0171 c0a0 d7 14              		STAB	ZHI
+0172 c0a2 de 14              GOTO:	LDX     ZHI         ; MOVE ADRS TO PPC
+0173 c0a4 df 22                      STX     PPC
+0174 c0a6 39                         RTS                 ; FETCH
+0175 c0a7 de 14              LETI:   LDX  	ZHI         ; MOVE ADRS TO MI PTR
+0176 c0a9 df 26                      STX     I
+0177 c0ab 39                         RTS                 ; FETCH
+0178 c0ac 30                 DOSUB:  TSX                 ; SAVE SP
+0179 c0ad 9e 24                      LDS     PSP
+0180 c0af 96 23                      LDAA  	PPC+1       ; PUSH PPC
+0181 c0b1 36                         PSHA
+0182 c0b2 96 22                      LDAA   	PPC
+0183 c0b4 36                         PSHA
+0184 c0b5 9f 24                      STS  	PSP         ; SAVE CHIP SP
+0185 c0b7 35                         TXS                 ; RESTORE REAL SP
+0186 c0b8 20 e8                      BRA  	GOTO        ; JUMP TO ADRS(MMM)
+0187                         ;
+0188                         ; CONDITIONAL SKIP ROUTINES
+0189                         ;
+0190 c0ba 96 29              SKFEK:	LDAA   	PIR+1		; GET KK
+0191 c0bc 91 2e              SKFEQ:  CMPA    VX
+0192 c0be 27 10                      BEQ 	SKIP2
+0193 c0c0 39                 		RTS
+0194 c0c1 96 29              SKFNK:  LDAA   	PIR+1       ; GET KK
+0195 c0c3 91 2e              SKFNE:  CMPA   	VX
+0196 c0c5 26 09                      BNE     SKIP2
+0197 c0c7 39                         RTS
+0198 c0c8 96 2f              SKFEV:  LDAA 	VY         	; GET VY
+0199 c0ca 20 f0                      BRA     SKFEQ
+0200 c0cc 96 2f              SKFNV:  LDAA    VY
+0201 c0ce 20 f3                      BRA     SKFNE
+0202 c0d0 de 22              SKIP2:  LDX  	PPC         ; ADD 2 TO PPC
+0203 c0d2 08                         INX
+0204 c0d3 08                         INX
+0205 c0d4 df 22                      STX     PPC
+0206 c0d6 39                         RTS
+0207 c0d7 bd c2 97           SKFKEY: JSR  	KEYINP   	; INTERROGATE KEYBOARD
+0208 c0da 7d 00 18                   TST     BADRED      ; KEY DOWN?
+0209 c0dd 27 07                      BEQ     SKFK1
+0210 c0df c6 a1                      LDAB	#$A1        ; WHAT INSTRN?
+0211 c0e1 d1 29                      CMPB	PIR+1       ; SKF VX#KEY
+0212 c0e3 27 eb                      BEQ     SKIP2
+0213 c0e5 39                         RTS                	; NO KEY GO FETCH
+0214 c0e6 c6 9e              SKFK1:  LDAB  	#$9E
+0215 c0e8 d1 29                      CMPB  	PIR+1       ; WHAT INSTRN?
+0216 c0ea 27 d0                      BEQ     SKFEQ
+0217 c0ec 20 d5                      BRA     SKFNE
+0218                         ;
+0219                         ; ARITHMETIC/LOGIC ROUTINES
+0220                         ;
+0221 c0ee 96 29              LETK:   LDAA  	PIR+1     	; GET KK
+0222 c0f0 20 3b                      BRA     PUTVX
+0223 c0f2 96 29              LETVK:  LDAA    PIR+1
+0224 c0f4 9b 2e                      ADDA    VX
+0225 c0f6 20 35                      BRA     PUTVX
+0226 c0f8 8d 38              RANDV:  BSR  	RANDOM     	; GET RANDOM BYTE
+0227 c0fa 94 29                      ANDA    PIR+1
+0228 c0fc 20 2f                      BRA     PUTVX
+0229 c0fe 96 2e              LETVV:  LDAA    VX
+0230 c100 d6 29                      LDAB   	PIR+1
+0231 c102 c4 0f                      ANDB  	#$0F        ; EXTRACT N
+0232 c104 26 02                      BNE     LETV1
+0233 c106 96 2f                      LDAA  	VY          ; VX=VY
+0234 c108 5a                 LETV1:  DECB
+0235 c109 26 02                      BNE     LETV2
+0236 c10b 9a 2f                      ORAA  	VY         	; VX=VX!VY (OR)
+0237 c10d 5a                 LETV2:  DECB
+0238 c10e 26 02                      BNE     LETV4
+0239 c110 94 2f                      ANDA  	VY          ; VX=VX.VY
+0240 c112 5a                 LETV4:  DECB
+0241 c113 5a                         DECB
+0242 c114 26 0a                      BNE     LETV5
+0243 c116 7f 00 3f                   CLR     VF			; VF=0
+0244 c119 9b 2f                      ADDA    VY          ; VX=VX+VY
+0245 c11b 24 03              		BCC     LETV5       ; RESULT < 256
+0246 c11d 7c 00 3f                   INC     VF          ; VF=1(OVERFLOW)
+0247 c120 5a                 LETV5:  DECB
+0248 c121 26 0a                      BNE     PUTVX
+0249 c123 7f 00 3f                   CLR     VF			; VF=0
+0250 c126 90 2f                      SUBA    VY			; VX=VX-VY
+0251 c128 25 03                      BCS     PUTVX       ; VX<VY? (UNSIGNED)
+0252 c12a 7c 00 3f                   INC     VF          ; NO PUT VF=l
+0253 c12d de 2a              PUTVX:  LDX     VXLOC       ; REPLACE VX
+0254 c12f a7 00                      STAA    0,X
+0255 c131 39                         RTS
+0256                         ;
+0257                         ; RANDOM BYTE GENERATOR
+0258                         ; 
+0259 c132 86 c0              RANDOM: LDAA  	#$C0        ; HIGH-ORDER BYTE OF RNDX =
+0260 c134 97 2c                      STAA  	RNDX        ; =MSB OF CHIP8 START ADRS
+0261 c136 7c 00 2d                   INC     RNDX+1
+0262 c139 de 2c              		LDX		RNDX		; POINT TO NEXT PROGRAM BYTE
+0263 c13b 96 0d                      LDAA  	RND         ; GET SEED (LAST VALUE)
+0264 c13d ab 00                      ADDA  	0,X         ; MANGLE IT
+0265 c13f a8 ff                      EORA    $FF,X  
+0266 c141 97 0d                      STAA  	RND			; STASH IT
+0267 c143 39                         RTS
+0268                         ;
+0269                         ; JUMP TABLE FOR MISCELLANEOUS INSTRNS [FXZZ]
+0270                         ;
+0271 c144 07                 MINJMP:	FCB		$07			; VX=TIME
+0272 c145 c1 79              		FDB		VTIME
+0273 c147 0a                         FCB     $0A       	; VX=KEY
+0274 c148 c1 7d                      FDB     VKEY
+0275 c14a 15                         FCB		$15       	; TIME=VX
+0276 c14b c1 82                      FDB     TIMEV
+0277 c14d 18                         FCB		$18         ; TONE=VX
+0278 c14e c1 85                      FDB 	TONEV
+0279 c150 1e                         FCB  	$1E         ; I=I+VX
+0280 c151 c1 89                      FDB     LETIV     
+0281 c153 29                         FCB		$29			; I=DSPL,VX
+0282 c154 c1 93                      FDB     LETDSP
+0283 c156 33                         FCB		$33   		; MI=DEQ,VX
+0284 c157 c1 de                      FDB		LETDEQ
+0285 c159 55                         FCB  	$55         ; MI=VO:VX
+0286 c15a c1 fa                      FDB     STORV
+0287 c15c 65                         FCB		$65         ; VO:VX=MI
+0288 c15d c2 04                      FDB     LOADV
+0289                         ;
+0290 c15f ce c1 44           MISC:	LDX   	#MINJMP    	; POINT TO TABLE
+0291 c162 c6 09                      LDAB	#9			; DO 9 TIMES		
+0292 c164 a6 00              MIS1:   LDAA    0,X         ; GET TABLE OPCODE
+0293 c166 91 29                      CMPA	PIR+1
+0294 c168 27 09                      BEQ     MIS2
+0295 c16a 08                         INX
+0296 c16b 08                         INX
+0297 c16c 08                         INX
+0298 c16d 5a                         DECB
+0299 c16e 26 f4              		BNE    	MIS1
+0300 c170 7e c3 60                   JMP     START    	; BAD OPCODE, RETURN TO MON.
+0301 c173 ee 01              MIS2:   LDX    	1,X         ; GET ROUTINE ADRS FROM TABLE
+0302 c175 96 2e                      LDAA    VX          ; GET VX
+0303 c177 6e 00                      JMP     0,X         ; GO TO ROUTINE
+0304 c179 96 20              VTIME:  LDAA    TIME
+0305 c17b 20 b0                      BRA     PUTVX
+0306 c17d bd c2 c4           VKEY:   JSR     GETKEY
+0307 c180 20 ab                      BRA     PUTVX
+0308 c182 97 20              TIMEV:  STAA   	TIME
+0309 c184 39                         RTS
+0310 c185 16                 TONEV:  TAB					; SET DURATION=VX
+0311 c186 7e c2 e1           		JMP   	BTONE
+0312 c189 5f                 LETIV:  CLRB                ; 16-BIT ADD VX TO I
+0313 c18a 9b 27                      ADDA   	I+1
+0314 c18c 97 27                      STAA    I+1
+0315 c18e d9 26                      ADCB    I
+0316 c190 d7 26                      STAB    I
+0317 c192 39                         RTS
+0318                         ;
+0319                         ; COPY COMPRESSED DIGIT PATTERN (FROM TABLE)
+0320                         ; TO  5-BYTE ARRAY (DDPAT), & SET I FOR 'SHOW',
+0321                         ;
+0322 c193 ce c1 bc           LETDSP: LDX   	#HEXTAB-2	; POINT TO HEX DIGIT PATTERNS ,
+0323 c196 84 0f                      ANDA  	#$0F        ; ISOLATE LS DIGIT
+0324 c198 08                 LDSP1:  INX                 ; SEARCH TABLE.....
+0325 c199 08                         INX
+0326 c19a 4a                         DECA                ; (A=VX)
+0327 c19b 2a fb                      BPL		LDSP1
+0328 c19d ee 00                      LDX  	0,X      	; MOVE PATNH
+0329 c19f df 1e                      STX     PATNH
+0330 c1a1 ce 00 08                   LDX  	#DDPAT    	; POINT PATTERN ARRAY(5)
+0331 c1a4 df 26                      STX  	I           ; SET MI POINTER
+0332 c1a6 c6 05                      LDAB  	#5          ; DO 5 TIMES
+0333 c1a8 96 1e              LDSP5:  LDAA    PATNH
+0334 c1aa 84 e0                      ANDA  	#$E0        ; EXTRACT 3 BITS
+0335 c1ac a7 04                      STAA    4,X
+0336 c1ae 09                         DEX
+0337 c1af 86 03                      LDAA  	#3          ; DO 3 TIMES
+0338 c1b1 79 00 1f           LDSP3:  ROL  	PATNL       ; MOVE NEXT 3 BITS
+0339 c1b4 79 00 1e                   ROL		PATNH
+0340 c1b7 4a                         DECA 
+0341 c1b8 26 f7              		BNE  	LDSP3      	; CONT (3)....
+0342 c1ba 5a                         DECB 
+0343 c1bb 26 eb              		BNE  	LDSP5		; CONT (5)....
+0344 c1bd 39                         RTS
+0345                         ;
+0346                         ; HEXADECIMAL DIGIT PATTERNS (3X5  MATRIX)
+0347                         ;
+0348 c1be f6 df              HEXTAB:	FDB  	$F6DF     	; 0
+0349 c1c0 49 25                      FDB 	$4925       ; 1
+0350 c1c2 f3 9f                      FDB  	$F39F       ; 2
+0351 c1c4 e7 9f                      FDB  	$E79F       ; 3
+0352 c1c6 3e d9                      FDB  	$3ED9       ; 4
+0353 c1c8 e7 cf                      FDB  	$E7CF       ; 5
+0354 c1ca f7 cf                      FDB  	$F7CF       ; 6
+0355 c1cc 24 9f                      FDB  	$249F       ; 7
+0356 c1ce f7 df                      FDB     $F7DF       ; 8      
+0357 c1d0 e7 df                      FDB  	$E7DF       ; 9
+0358 c1d2 b7 df                      FDB  	$B7DF       ; A
+0359 c1d4 d7 dd                      FDB     $D7DD       ; B
+0360 c1d6 f2 4f                      FDB     $F24F   	; C
+0361 c1d8 d6 dd                      FDB  	$D6DD       ; D
+0362 c1da f3 cf                      FDB  	$F3CF       ; E
+0363 c1dc 93 4f                      FDB  	$934F       ; F
+0364                         ;
+0365 c1de de 26              LETDEQ: LDX     I           ; GET MI POINTER
+0366 c1e0 c6 64                      LDAB  	#100        ; N=100
+0367 c1e2 8d 06                      BSR  	DECI        ; CALC 100'S DIGIT
+0368 c1e4 c6 0a                      LDAB  	#10         ; N=10
+0369 c1e6 8d 02                      BSR  	DECI        ; CALC l0'S DIGIT
+0370 c1e8 c6 01                      LDAB  	#1
+0371 c1ea d7 0e              DECI:   STAB    N			
+0372 c1ec 5f                         CLRB
+0373 c1ed 91 0e              LDEQ1:  CMPA  	N          	; DO UNTIL A<N  ...
+0374 c1ef 25 05                      BCS  	LDEQ2       ; BRANCH IF LOWER NOT SAME.
+0375 c1f1 5c                         INCB
+0376 c1f2 90 0e                      SUBA    N
+0377 c1f4 20 f7                      BRA     LDEQ1       ; END-DO...
+0378 c1f6 e7 00              LDEQ2:  STAB  	0,X         ; STASH
+0379 c1f8 08                         INX                 ; FOR NEXT DIGIT
+0380 c1f9 39                         RTS
+0381 c1fa 0f                 STORV:  SEI                 ; KILL IRQ FOR DATA STACK
+0382 c1fb 9f 12                      STS  	XTEMP       ; SAVE SP
+0383 c1fd 8e 00 2f                   LDS  	#VO-1       ; POINT TO VARIABLES TABLE
+0384 c200 de 26                      LDX  	I           ; FOINT MI
+0385 c202 20 09                      BRA  	MOVX        ; TRANSFER NB BYTES
+0386 c204 0f                 LOADV:  SEI                 ; KILL IRQ
+0387 c205 9f 12                      STS     XTEMP
+0388 c207 9e 26                      LDS     I           ; POINT MI
+0389 c209 34                 		DES
+0390 c20a ce 00 30                   LDX  	#VO         ; POINT TO VO
+0391 c20d d6 2b              MOVX:   LDAB  	VXLOC+1  	; CALC. X  (AS IN VX)
+0392 c20f c4 0f                      ANDB  	#$0F        ; LOOP (X+l) TIMES.....
+0393 c211 32                 MOVX1:  PULA                ; GET NEXT V
+0394 c212 a7 00                      STAA   	0,X         ; COPY IT
+0395 c214 08                         INX
+0396 c215 7c 00 27           		INC 	I+1         ; I=I+X+1(ASSUMES SAME PAGE)
+0397 c218 5a                         DECB
+0398 c219 2a f6                      BPL  	MOVX1       ; CONTINUE...
+0399 c21b 9e 12                      LDS     XTEMP       ; RESTORE SP
+0400 c21d 0e                         CLI		        	; RESTORE IRQ
+0401 c21e 39                         RTS
+0402                         ;
+0403                         ; DISPLAY ROUTINES 
+0404                         ;   
+0405 c21f d6 29              SHOW:   LDAB    PIR+1       ; GET N (OPCODE LSB)
+0406 c221 7f 00 3f                   CLR     VF          ; CLEAR OVERLAP FLAG
+0407 c224 de 26              SHOWI:  LDX     I           ; POINT TO PATTERN BYTES
+0408                         ;
+0409                         ; CHIPOS PATCHES FOR (HI-RES)
+0410                         ;
+0411 c226 c4 0f                      ANDB    #$0F                     ;C226: C4 0F
+0412 c228 26 02                      BNE     SHOW2                    ;C228: 26 02
+0413 c22a c6 10                      LDAB    #16                      ;C22A: C6 10
+0414 c22c 37                 SHOW2:  PSHB                             ;C22C: 37
+0415 c22d df 14                      STX     ZHI                      ;C22D: DF 14
+0416 c22f a6 00                      LDAA    0,X                      ;C22F: A6 00
+0417 c231 97 1e                      STAA    PATNH                    ;C231: 97 1E
+0418 c233 7f 00 1f                   CLR     PATNL                    ;C233: 7F 00 1F
+0419 c236 d6 2e                      LDAB    VX                       ;C236: D6 2E
+0420 c238 c4 07                      ANDB    #7                       ;C238: C4 07
+0421 c23a 27 09              SHOW3:  BEQ     SHOW4                    ;C23A: 27 09
+0422 c23c 74 00 1e                   LSR     PATNH                    ;C23C: 74 00 1E
+0423 c23f 76 00 1f                   ROR     PATNL                    ;C23F: 76 00 1F
+0424 c242 5a                         DECB                             ;C242: 5A
+0425 c243 26 f5                      BNE     SHOW3                    ;C243: 26 F5
+0426 c245 d6 2e              SHOW4   LDAB    VX                       ;C245: D6 2E
+0427 c247 8d 28                      BSR     DISLOC                   ;C247: 8D 28
+0428 c249 96 1e                      LDAA    PATNH                    ;C249: 96 1E
+0429 c24b 8d 15                      BSR     SHOWUP                   ;C24B: 8D 15
+0430 c24d d6 2e                      LDAB    VX                       ;C24D: D6 2E
+0431 c24f cb 08                      ADDB    #8                       ;C24F: CB 08
+0432 c251 8d 1e                      BSR     DISLOC                   ;C251: 8D 1E
+0433 c253 96 1f                      LDAA    PATNL                    ;C253: 96 1F
+0434 c255 8d 0b                      BSR     SHOWUP                   ;C255: 8D 0B
+0435 c257 7c 00 2f                   INC     VY                       ;C257: 7C 00 2F
+0436 c25a de 14                      LDX     ZHI                      ;C25A: DE 14
+0437 c25c 08                         INX                              ;C25C: 08
+0438 c25d 33                         PULB                             ;C25D: 33
+0439 c25e 5a                         DECB                             ;C25E: 5A
+0440 c25f 26 cb                      BNE     SHOW2                    ;C25F: 26 CB
+0441 c261 39                         RTS                              ;C261: 39
+0442 c262 16                 SHOWUP: TAB                              ;C262: 16
+0443 c263 e8 00                      EORB    0,X                      ;C263: E8 00
+0444 c265 aa 00                      ORAA    0,X                      ;C265: AA 00
+0445 c267 e7 00                      STAB    0,X                      ;C267: E7 00
+0446 c269 11                         CBA                              ;C269: 11
+0447 c26a 27 04                      BEQ     SHOWR                    ;C26A: 27 04
+0448 c26c 86 01                      LDAA    #1                       ;C26C: 86 01
+0449 c26e 97 3f                      STAA    VF                       ;C26E: 97 3F
+0450 c270 39                 SHOWR:  RTS                              ;C270: 39
+0451 c271 96 2f              DISLOC: LDAA    VY                       ;C271: 96 2F
+0452 c273 84 3f                      ANDA    #$3F                     ;C273: 84 3F
+0453 c275 58                         ASLB                             ;C275: 58
+0454 c276 44                         LSRA                             ;C276: 44
+0455 c277 56                         RORB                             ;C277: 56
+0456 c278 44                         LSRA                             ;C278: 44
+0457 c279 56                         RORB                             ;C279: 56
+0458 c27a 44                         LSRA                             ;C27A: 44
+0459 c27b 56                         RORB                             ;C27B: 56
+0460 c27c 44                         LSRA                             ;C27C: 44
+0461 c27d 56                         RORB                             ;C27D: 56
+0462 c27e 8a 40                      ORAA    #$40                     ;C27E: 8A 40
+0463 c280 97 1c                      STAA    BLOC                     ;C280: 97 1C
+0464 c282 d7 1d                      STAB    BLOC+1                   ;C282: D7 1D
+0465 c284 de 1c                      LDX     BLOC                     ;C284: DE 1C
+0466 c286 39                         RTS                              ;C286: 39
+0467                         ;
+0468                         ; KEYPAD ROUTINES 
+0469                         ;
+0470 c287 c6 f0              PAINZ:  LDAB  	#$F0        ; INITIALIZE PORT
+0471 c289 ce 80 10           PAINV:  LDX     #PIAA       ; (ENTRY PT FOR INV. DDR)
+0472 c28c 6f 01                      CLR     1,X         ; RESET & SELECT DDR
+0473 c28e e7 00                      STAB   	0,X         ; SET DATA DIRECTION
+0474 c290 c6 06                      LDAB  	#$06        ; SET O/P REG & SETUP CTRL
+0475 c292 e7 01                      STAB    1,X          
+0476 c294 6f 00                      CLR     0,X         ; OUTPUT ZEROS & RE5ET FLAGS
+0477 c296 39                         RTS
+0478                         ;
+0479                         ; KEYPAD INPUT SERVICE ROUTINE
+0480                         ;
+0481 c297 8d ee              KEYINP: BSR     PAINZ       ; RESET KEYPAD PORT
+0482 c299 7f 00 18                   CLR     BADRED     	; RESET BAD-READ FLAG
+0483 c29c 8d 55              		BSR		DEL333		; DELAY FOR DEBOUNCE
+0484 c29e e6 00                      LDAB    0,X         ; INPUT ROW DATA
+0485 c2a0 8d 15                      BSR     KBILD      	; FORM CODE BITS 0,1
+0486 c2a2 97 17                      STAA    KEYCOD
+0487 c2a4 c6 0f                      LDAB  	#$0F        ; SET DDR FOR...
+0488 c2a6 8d e1                      BSR     PAINV       ; INVERSE ROW/COL  DIR N
+0489 c2a8 e6 00                      LDAB    0,X         ; INPUT COLUM DATA
+0490 c2aa 54                         LSRB                ; RIGHT JUSTIFY
+0491 c2ab 54                         LSRB
+0492 c2ac 54                         LSRB
+0493 c2ad 54                         LSRB
+0494 c2ae 8d 07                      BSR     KBILD       ; FORM CODE BITS 2,3
+0495 c2b0 48                         ASLA					
+0496 c2b1 48                         ASLA
+0497 c2b2 9b 17                      ADDA    KEYCOD
+0498 c2b4 97 17                      STAA   	KEYCOD     	; BUILD COMPLETE KEYCODE
+0499 c2b6 39                         RTS
+0500 c2b7 c1 0f              KBILD:  CMPB  	#$0F        ; CHECK KEY STATUS
+0501 c2b9 26 02                      BNE     KBILD0		; KEY IS DOWN, GO DECODE IT
+0502 c2bb d7 18                      STAB	BADRED     	; NO KEY, SET BAD-READ FLAG
+0503 c2bd 86 ff              KBILD0: LDAA	#-1
+0504 c2bf 4c                 KBILD1: INCA                ; (A=RESULT)
+0505 c2c0 54                         LSRB                ; SHIFT DATA BIT TO CARRY
+0506 c2c1 25 fc                      BCS     KBILD1      ; FOUND ZERO BIT ?
+0507 c2c3 39                         RTS
+0508                         ;
+0509                         ; GETKEY WAIT FOR KEYDOWN, THEN INPUTS
+0510                         ;
+0511 c2c4 df 12              GETKEY: STX  	XTEMP       ; SAVE X FOR CALLING ROUTINE
+0512 c2c6 8d bf              GETK1:  BSR     PAINZ       ; RESET PORT, CLEAR FLAGS
+0513 c2c8 a6 01              GETK2:  LDAA    1,X         ; INPUT STATUS (HEX KEY DOWN?)
+0514 c2ca 2b 07                      BMI     HEXKEY  	; YES FETCH IT IN
+0515 c2cc 48                         ASLA               	; TRY CA2 FLAG
+0516 c2cd 2a f9                      BPL  	GETK2		; FN  XEY DOWN? (A<0?)
+0517 c2cf 6d 00              FNKEY:  TST     0,X         ; YES: RESET FLAG IN PIA
+0518 c2d1 20 07                      BRA  	HEXK1       ; RETURN WITHOUT CODE
+0519 c2d3 8d c2              HEXKEY: BSR  	KEYINP      ; DECODE THE KEYPAD
+0520 c2d5 7d 00 18                   TST  	BADRED      ; WAS IT A BAD READ?
+0521 c2d8 26 ec                      BNE  	GETK1       ; YES, TRY  AGAIN
+0522 c2da 8d 03              HEXK1:  BSR  	BLEEP       ; O.K. ACKNOWLEDGE
+0523 c2dc de 12                      LDX  	XTEMP       ; RESTORE CALLER'S X-REG
+0524 c2de 39                         RTS                 ; RETURN (WITH A<O FOR FN KEY)
+0525                         ;
+0526                         ; TONE GENERATING ROUTINES
+0527                         ;
+0528 c2df c6 04              BLEEP:  LDAB	#4
+0529 c2e1 d7 21              BTONE:  STAB  	TONE      	; SET DURATION (RTC CYCLES)
+0530 c2e3 c6 41                      LDAB  	#$41        ; TURN AUDIO ON 
+0531 c2e5 f7 80 12                   STAB   	PIAB
+0532 c2e8 7d 00 21           BTON1:  TST     TONE        ; WAIT FOR RTC TIME-OUT
+0533 c2eb 26 fb                      BNE     BTON1
+0534 c2ed c6 01                      LDAB  	#1          ; TURN AUDIO OFF
+0535 c2ef f7 80 12                   STAB  	PIAB
+0536 c2f2 39                         RTS
+0537                         ;
+0538                         ; SOFTWARE DELAY ROUTINE FOR SERIAL I/O:
+0539                         ;
+0540 c2f3 8d 00              DEL333: BSR  	DEL167  	; DELAY FOR 3.33 MILLISEC
+0541 c2f5 37                 DEL167: PSHB
+0542 c2f6 c6 c8                      LDAB  	#200        ; DELAY FOR 1.67 MILLISEC
+0543 c2f8 5a                 DEL:    DECB
+0544 c2f9 01                         NOP
+0545 c2fa 26 fc                      BNE     DEL
+0546 c2fc 33                         PULB
+0547 c2fd 39                         RTS
+0548                         ;
+0549                         ; TAPE INPUT/OUTPUT ROUTINES
+0550                         ; INlTIALIZE TAPE, TONE, RTC, & DMA
+0551                         ; A=$3F FOR DISPLAY/DMA ON; A=$37 FOR OFF:
+0552                         ;
+0553 c2fe ce 80 12           PBINZ:  LDX     #PIAB
+0554 c301 c6 3b              		LDAB  	#$3B       	; SELECT DDR (DMA ON)
+0555 c303 e7 01                      STAB    1,X
+0556 c305 c6 7f                      LDAB  	#$7F     	; WRITE DDR
+0557 c307 e7 00                      STAB	0,X
+0558 c309 a7 01                      STAA	1,X 		; WRITE CTRL REG
+0559 c30b c6 01                      LDAB  	#1          ; OUTPUT FOR T0NE OFF, AND...
+0560 c30d e7 00                      STAB   	0,X         ; TAPE DATA-OUT HIGH (MARKING)
+0561 c30f 39                         RTS
+0562                         ;
+0563                         ; INPUT ONE BYTE FROM TAPE PORT
+0564                         ;
+0565 c310 8d 13              INBYT:  BSR  	XCHG       	; EXCHANGE X FOR PIA ADRS
+0566 c312 a6 00              IN1:    LDAA   	0,X
+0567 c314 2b fc                      BMI   	IN1         ; LOOK FOR START BIT
+0568 c316 8d dd                      BSR  	DEL167      ; DELAY HALF BIT-TIME (300BD)
+0569 c318 c6 09                      LDAB  	#9          ; DO 9 TIMES....
+0570 c31a 0d                 IN2:    SEC                	; ENSURE PB0 MARKING
+0571 c31b 69 00                      ROL  	0,X         ; INPUT & SHIFT NEXT BIT
+0572 c31d 46                         RORA                ; INTO ACC-A
+0573 c31e 8d d3                      BSR  	DEL333      ; WAIT 1 BIT-TIME
+0574 c320 5a                         DECB
+0575 c321 26 f7                      BNE  	IN2       	; CONT....
+0576 c323 20 17                      BRA     OUTX        ; RESTORE X AND RETURN
+0577 c325 df 12              XCHG:   STX  	XTEMP       ; SAVE   X-REG
+0578 c327 ce 80 12                   LDX     #PIAB
+0579 c32a 39                         RTS
+0580                         ;
+0581                         ; OUTPUT ONE BYTE TO TAPE PORT 
+0582                         ;
+0583 c32b 8d f8              OUTBYT: BSR     XCHG
+0584 c32d 36                         PSHA
+0585 c32e 6a 00                      DEC  	0,X        	; RESET START BIT
+0586 c330 c6 0a                      LDAB	#10         ; DO 10 TIMES....
+0587 c332 8d bf              OUT1:  	BSR  	DEL333      ; DELAY 1 BIT-TIME
+0588 c334 a7 00                      STAA   	0,X         ; NEXT BIT TO OUT LINE (PB0)
+0589 c336 0d                         SEC
+0590 c337 46                         RORA
+0591 c338 5a                         DECB
+0592 c339 26 f7                      BNE  	OUT1     	; CONT....
+0593 c33b 32                         PULA                ; RESTORE A
+0594 c33c de 12              OUTX:   LDX   	XTEMP      	; RESTORE X
+0595 c33e 39                         RTS
+0596 c33f 20 83              GETKEE: BRA  	GETKEY      ; FOR INTERLINKING
+0597                         ;
+0598                         ; TAPE LOAD AND DUMP ROUTINES
+0599                         ;
+0600 c341 86 37              LODUMX: LDAA  	#$37        ; KILL DISPLAY (DMA OFF)
+0601 c343 8d b9                      BSR     PBINZ
+0602 c345 de 02                      LDX  	BEGA        ; POINT TO FIRST LOAD/DUMP ADR
+0603 c347 39                         RTS
+0604 c348 8d f7              DUMP:   BSR     LODUMX
+0605 c34a a6 00              DUMP1:  LDAA    0,X      	; FETCH RAM BYTE
+0606 c34c 8d dd                      BSR     OUTBYT
+0607 c34e 08                         INX
+0608 c34f 9c 04                      CPX		ENDA       	; (ENDA = LAST ADRS+1)
+0609 c351 26 f7                      BNE     DUMP1
+0610 c353 20 0b                      BRA     START
+0611 c355 8d ea              LOAD:   BSR     LODUMX
+0612 c357 8d b7              LOAD1:  BSR		INBYT
+0613 c359 a7 00                      STAA  	0,X         ; STASH BYTE IN RAM
+0614 c35b 08                         INX
+0615 c35c 9c 04                      CPX  	ENDA        ; DONE?
+0616 c35e 26 f7                      BNE  	LOAD1       ; CONT....
+0617                         ;      (BRA START)
+0618                         ;
+0619                         ; MONITOR ENTRY POINT
+0620                         ;
+0621 c360 8e 00 7f           START:  LDS     #STOP       ; RESET SP TO TOP
+0622 c363 ce c3 e9                   LDX   	#RTC        ; SETUP IRQ VECTOR FOR RTC
+0623 c366 df 00                      STX     IRQV
+0624 c368 86 3f                      LDAA  	#$3F        ; SETUP I/O PORT: DISPLAY ON.
+0625 c36a 8d 92                      BSR     PBINZ
+0626 c36c 8d 43                      BSR     SHOADR     	; PROMPT
+0627 c36e 0e                 		CLI                 ; ENABLE RELATIVE TIME CLOCK
+0628 c36f 8d ce              COMAND: BSR    	GETKEE      ; INPUT SOMETHING
+0629 c371 4d                         TSTA  
+0630 c372 2a 10                      BPL     INADRS      ; IF HEX, GET AN ADDRESS
+0631 c374 8d c9                      BSR		GETKEE 		; IF FN, GET A COMMAND
+0632 c376 84 03              		ANDA	#3      
+0633 c378 27 23                      BEQ     MEMOD       ; 0 = MEM0RY MODIFY
+0634 c37a 4a                         DECA
+0635 c37b 27 d8              		BEQ		LOAD    	; 1 = TAPE LOAD
+0636 c37d 4a                         DECA
+0637 c37e 27 c8                      BEQ		DUMP       	; 2 = TAPE DUMP
+0638 c380 de 06              GO:     LDX     ADRS        ; FETCH ADRS FOR GO
+0639 c382 6e 00                      JMP     0,X
+0640 c384 8d 0c              INADRS: BSR     BYT1        ; BUILD ADRS MS BYTE
+0641 c386 97 06                      STAA   	ADRS
+0642 c388 8d 06                      BSR     BYTIN       ; INPUT & BUILD LSB
+0643 c38a 97 07                      STAA   	ADRS+1 
+0644 c38c 8d 23                      BSR     SHOADR      ; DISPLAY RESULTANT ADRS
+0645 c38e 20 df                      BRA     COMAND
+0646 c390 8d ad              BYTIN:  BSR     GETKEE      ; INPUT 2 HEX DIGITS
+0647 c392 48                 BYT1:   ASLA                ; LEFT JUSTIFY FIRST DIGIT
+0648 c393 48                         ASLA
+0649 c394 48                         ASLA
+0650 c395 48                         ASLA
+0651 c396 97 0f                      STAA	ATEMP     	; HOLD IT
+0652 c398 8d a5                      BSR     GETKEE     	; INPUT ANOTHER DIGIT
+0653 c39a 9b 0f                      ADDA    ATEMP       ; BUILD A BYTE
+0654 c39c 39                         RTS
+0655                         ;
+0656                         ; MEMORY MODIFY ROUTINE
+0657                         ;
+0658 c39d 8d 12              MEMOD:  BSR  	SHOADR      ; SHOW CURRENT ADRS
+0659 c39f de 06                      LDX     ADRS        ; SHOW DATA AT ADRS
+0660 c3a1 8d 25                      BSR     SHODAT      ; 
+0661 c3a3 8d 9a                      BSR  	GETKEE      ; WAIT FOR INPUT
+0662 c3a5 4d                         TSTA
+0663 c3a6 2b 04                      BMI  	MEM1        ; FN KEY; NEXT ADRS
+0664 c3a8 8d e8                      BSR  	BYT1        ; HEX KEY; NEW DATA BYTE
+0665 c3aa a7 00                      STAA  	0,X         ; DEPOSIT IT
+0666 c3ac 08                 MEM1:   INX
+0667 c3ad df 06                      STX     ADRS		; BUMP ADRS
+0668 c3af 20 ec                      BRA     MEMOD
+0669 c3b1 86 10              SHOADR: LDAA    #$10        ; SET CURSOR HOME POSITION
+0670 c3b3 8d 2b                      BSR     CURS1
+0671 c3b5 ce 43 90                   LDX     #DISBUF+912	; ILLUMINATE LAST 7 ROWS (HI-RES)
+0672 c3b8 86 ff                      LDAA  	#$FF
+0673 c3ba bd c0 7d                   JSR     FILL
+0674 c3bd ce 00 06                   LDX     #ADRS       ; POINT TO ADRS MS BYTE
+0675 c3c0 8d 06                      BSR     SHODAT
+0676 c3c2 08                         INX                 ; FOINT TO ADRS LS BYTE
+0677 c3c3 8d 03                      BSR     SHODAT
+0678 c3c5 8d 15                      BSR     CURSR       ; MOVE CURSOR RIGHT
+0679 c3c7 39                 	RTS
+0680 c3c8 a6 00              SHODAT: LDAA   	0,X         ; FETCH DATA @ X
+0681 c3ca 36                 SHOBYT  PSHA
+0682 c3cb 44                         LSRA           		; ISOLATE MS DIGIT
+0683 c3cc 44                         LSRA
+0684 c3cd 44                         LSRA
+0685 c3ce 44                         LSRA
+0686 c3cf 8d 01                      BSR   	DIGOUT    	; 5HOw  ONE dIGIT
+0687 c3d1 32                         PULA
+0688 c3d2 df 12              DIGOUT: STX     XTEMP      	; SAVE X
+0689 c3d4 bd c1 93                   JSR     LETDSP      ; POINT TO DIGIT PATTERN
+0690 c3d7 c6 05                      LDAB	#5          ; SHOW 5-BYTE PATTERN
+0691 c3d9 bd c2 24                   JSR     SHOWI
+0692 c3dc 86 04              CURSR:  LDAA    #4        	; SHIFT CURSOR RIGHT 4 DOTS
+0693 c3de 9b 2e                      ADDA    VX
+0694 c3e0 97 2e              CURS1:  STAA   	VX          ; SET X COORD
+0695 c3e2 86 3a                      LDAA  	#$3A        ; SET Y COORD (HI-RES)
+0696 c3e4 97 2f                      STAA	VY
+0697 c3e6 de 12                      LDX     XTEMP       ; RESTORE X_REG
+0698 c3e8 39                         RTS
+0699                         ;
+0700                         ; REAL TIME CLOCK INTERRUPT SERVICE ROUTINE
+0701                         ;
+0702 c3e9 7a 00 20           RTC:	DEC		TIME
+0703 c3ec 7a 00 21                   DEC     TONE
+0704 c3ef 7d 80 12                   TST  	PIAB       	; CLEAR IRQ FLAG IN PIA
+0705 c3f2 3b                         RTI
+0706 c3f3 de 00              IRQ:	LDX		IRQV		; INDIRECT JUMP VIA IRQV
+0707 c3f5 6e 00                      JMP     0,X
+0708 c3f7 00                 		FCB     0
+0709                         ;
+0710                         ; RESTART AND INTERRUPT TRAPS
+0711                         ;
+0712 c3f8 c3 f3                      FDB     IRQ         ; (ALLOWS USER-WRITTEN ISR)
+0713 c3fa 00 80                      FDB     $0080       ; SWI ROUIINE AT $0080 (OPTION
+0714 c3fc 00 83                      FDB		$0083		; NMI ROUTINE AT $0083 (OPTION
+0715 c3fe c3 60                      FDB     START
+0716                                 END
+ADRS       0006
+ATEMP      000f
+BADRED     0018
+BEGA       0002
+BLEEP      c2df
+BLOC       001c
+BTON1      c2e8
+BTONE      c2e1
+BYT1       c392
+BYTIN      c390
+CALL       c093
+CHIP8      c000
+COMAND     c36f
+CURS1      c3e0
+CURSR      c3dc
+DDPAT      0008
+DECI       c1ea
+DEL        c2f8
+DEL167     c2f5
+DEL333     c2f3
+DIGOUT     c3d2
+DISBUF     4000
+DISLOC     c271
+DOSUB      c0ac
+DUMP       c348
+DUMP1      c34a
+ENDA       0004
+ENDBUF     4400
+ERASE      c079
+EXCALL     c06a
+EXEC       c02d
+EXEl       c034
+FETCH      c00c
+FILL       c07d
+FIND1      c043
+FINDV      c040
+FNKEY      c2cf
+GETK1      c2c6
+GETK2      c2c8
+GETKEE     c33f
+GETKEY     c2c4
+GO         c380
+GOTO       c0a2
+GOTOV      c097
+HEXK1      c2da
+HEXKEY     c2d3
+HEXTAB     c1be
+I          0026
+IN1        c312
+IN2        c31a
+INADRS     c384
+INBYT      c310
+IRQ        c3f3
+IRQV       0000
+JUMTAB     c04a
+KBILD      c2b7
+KBILD0     c2bd
+KBILD1     c2bf
+KEYCOD     0017
+KEYINP     c297
+LDEQ1      c1ed
+LDEQ2      c1f6
+LDSP1      c198
+LDSP3      c1b1
+LDSP5      c1a8
+LETDEQ     c1de
+LETDSP     c193
+LETI       c0a7
+LETIV      c189
+LETK       c0ee
+LETV1      c108
+LETV2      c10d
+LETV4      c112
+LETV5      c120
+LETVK      c0f2
+LETVV      c0fe
+LOAD       c355
+LOAD1      c357
+LOADV      c204
+LODUMX     c341
+MEM1       c3ac
+MEMOD      c39d
+MINJMP     c144
+MIS1       c164
+MIS2       c173
+MISC       c15f
+MOVX       c20d
+MOVX1      c211
+N          000e
+OUT1       c332
+OUTBYT     c32b
+OUTX       c33c
+PAINV      c289
+PAINZ      c287
+PATNH      001e
+PATNL      001f
+PBINZ      c2fe
+PIAA       8010
+PIAB       8012
+PIR        0028
+PPC        0022
+PSP        0024
+PUTVX      c12d
+RANDOM     c132
+RANDV      c0f8
+RETDO      c086
+RND        000d
+RNDX       002c
+RTC        c3e9
+SHOADR     c3b1
+SHOBYT     c3ca
+SHODAT     c3c8
+SHOW       c21f
+SHOW2      c22c
+SHOW3      c23a
+SHOW4      c245
+SHOWI      c224
+SHOWR      c270
+SHOWUP     c262
+SKFEK      c0ba
+SKFEQ      c0bc
+SKFEV      c0c8
+SKFK1      c0e6
+SKFKEY     c0d7
+SKFNE      c0c3
+SKFNK      c0c1
+SKFNV      c0cc
+SKIP2      c0d0
+STACK      005f
+START      c360
+STOP       007f
+STORV      c1fa
+TIME       0020
+TIMEV      c182
+TONE       0021
+TONEV      c185
+VF         003f
+VKEY       c17d
+VO         0030
+VTIME      c179
+VX         002e
+VXLOC      002a
+VY         002f
+XCHG       c325
+XTEMP      0012
+ZHI        0014
+ZLO        0015
