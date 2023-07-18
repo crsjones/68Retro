@@ -1,0 +1,1014 @@
+output:  Dream-Invaders.s19
+0001                         * TITLE   DREAM INVADERS (C) 1980; M.J. Bauer
+0002                         *
+0003                         *
+0004                         * SCRATCHPAD RAM ASSIGNMENTS (PAGE ZERO):
+0005                         * ARRAY OF ALIEN X-COORDS;  5 ROWS BY 8 COLS:
+0006 00c0                    ALNARR  EQU     $C0     ALIEN ARRAY (40 BYTES)
+0007                         *
+0008                         * ARRAY OF ALIEN MISSILE COORDINATES;  4 X-Y PAIRS:
+0009 0088                    MISARR  EQU     $88     ALIENS' MISSILE ARRAY
+0010                         *
+0011                         * POINTERS:
+0012 0090                    	    ORG     $0090
+0013 0090                    MVAPTR  RMB     2       POINTS TO NEXT ALIEN TO MOVE
+0014 0092                    ALAPTR  RMB     2       GENERAL--PURPOSE PTR TO ALNARR
+0015 0094                    MISPTR  RMB     2       POINTS TO MISARR
+0016 0096                    ROW     RMB     1       TEMP ROW COUNT
+0017 0097                    COL     RMB     1       TEMP COL COUNT
+0018                         *
+0019                         * FLAGS.  (NON-ZERO IS 'TRUE' CONDITION)
+0020 0098                    NOALFG  RMB     1       NO ALIENS LEFT
+0021 0099                    LFLAG   RMB     1       ALIEN MISSILE HAS BEEN LAUNCHED
+0022 009a                    DROPFG  RMB     1       ALIEN DROPPED TO LOWER ROW
+0023 009b                    NGFLG   RMB     1       NO GUN TURRETS LEFT
+0024 009c                    ALNDFG  RMB     1       ALIEN LANDED
+0025 009d                    KMOVE   RMB     1       ALIEN MOVE COMPLETED
+0026                         *
+0027                         * VARIABLES:
+0028 00a0                    	    ORG     $00A0
+0029 00a0                    ALIENX  RMB     1       GENERAL ALIEN COORDS
+0030 00a1                    ALIENY  RMB     1
+0031 00a2                    AMISX   RMB     1       GENERAL MISSILE COORDS
+0032 00a3                    AMISY   RMB     1
+0033 00a4                    GMISX   RMB     1       GUN MISSILE COORDS
+0034 00a5                    GMISY   RMB     1
+0035 00a6                    GUNPOS  RMB     1       GUN-TURRET POSITION (X)
+0036 00a7                    SCORE   RMB     1       NO, OF ALIENS EXTERMINATED
+0037 00a8                    KSTEP   RMB     1       ALIEN STEPS BEFORE DIR'N CHANGER
+0038 00a9                    NMOVE   RMB     1       MAX. )(MOVE PER CYCLE
+0039 00aa                    ALSTEP  RMB     1       ALIEN STEP (+1 RIGHT;  -1 LEFT)
+0040 00ab                    KALIEN  RMB     1       ALIENS ON SCREEN COUNTER
+0041 00ac                    KGUNS   RMB     1       GUN-TURRETS LEFT COUNT
+0042 00ad                    QUOT    RMB     1       DIV QUOTIENT (TEMP)
+0043 00ae                    KMISS   RMB     1       ALIEN'S ACTIVE-MISSILE COUNT
+0044 00af                    NMISS   RMB     1       MAX. SIMULTANEOUS ALIEN MISSILES
+0045 00b0                    MDELAY  RMB     1       MAIN CYCLE DELAY (GAME SPEED)
+0046 00b1                    CLOCK1  RMB     1       CONTROL-CYCLE TIMERS
+0047 00b2                    CLOCK2  RMB     1
+0048 00b3                    KSHOT   RMB     1       SHOT COUNTER (used for DROP)
+0049 00b4                    NDROP   RMB     1       * SHOTS BEFORE ALIEN CAN DROP
+0050 00b5                    ROUND   RMB     1       ROUND ( 24 aliens per round)
+0051 00b6                    DECIM   RMB     4       DECIMAL EQUIV. WORKSPACE
+0052                         *
+0053                         * EXTERNAL (CHIPOS) REFERENCES:
+0054                         *
+0055 c226                    SHOWX   EQU     $C226   Show symbol  @ X, @(VX,VY),  B byte
+0056 c079                    ERASE   EQU     $C079   Clear screen
+0057 c132                    RANDOM  EQU     $C132   Get random byte (A)
+0058 c2e5                    BTON    EQU     $C2E5   Bleeper   (variable)
+0059 c287                    PAINZ   EQU     $C287   Initialize keypad port
+0060 c07d                    FILL    EQU     $C07D   Fill screen memory with constant
+0061 c2e1                    BTONE   EQU     $C2E1   Bleep for (B)*20 mSec.
+0062 c2c4                    GETKEY  EQU     $C2C4   Wait for input from keypad
+0063 c3d2                    DIGOUT  EQU     $C3D2   Display digit  @ X
+0064 c1e0                    DECEQ   EQU     $C1E0   Store 3-digit decimal equiv @ X
+0065 c3e0                    CURS1   EQU     $C3E0   Set display  'cursor' Pos'n (A)
+0066                         *
+0067 002e                    VX      EQU      $2E                                      
+0068 002f                    VY      EQU      $2F
+0069 003f                    VF      EQU      $3F
+0070 003f                    HITFLG  EQU      $3F     'Objects collided'  flag - VF
+0071 0020                    TIME    EQU      $20
+0072 0021                    TONE    EQU      $21
+0073                         *
+0074 0100                    DISBUF  EQU      $0100
+0075 0200                    ENDBUF  EQU      $0200
+0076                         *
+0077                         *
+0078                         *
+0079 8010                    PIAA    EQU      $8010   I/O PORT (KEYPAD)
+0080 8012                    PIAB    EQU      $8012   Spkr, RTC. etc.
+0081                         *
+0082                         *
+0083                         *******************************************************
+0084                         *           DREAM INVADERS - - - COPYRIGHT NOTICE     *
+0085                         *                                                     *
+0086                         * No part of this Program may be reproduced in any    *
+0087                         * form or used in other software product for Purpose  *
+0088                         * of distribution or commercial gain, except with     *
+0089                         * Permission from the author.                         *
+0090                         *                                                     *
+0091                         *******************************************************
+0092                         * MAINLINE (INITIALIZATION AND CONTROL CYCLE):
+0093                         *
+0094 0200                    	ORG       $0200
+0095                         *
+0096 0200 bd c2 87           MAINGO  JSR       PAINZ   Reset keypad port.
+0097 0203 86 00              	    LDAA     #0       CLEAR VARIABLES 
+0098 0205 ce 00 90                   LDX       #$90
+0099 0208 a7 00              MAIN1   STAA     0,X
+0100 020a 08                         INX
+0101 020b 8c 00 c0                   CPX       #$00C0    
+0102 020e 26 f8                      BNE       MAIN1
+0103                         *
+0104                         *INITIALIZE FOR NEW GAME:
+0105 0210 bd 05 fa           MAIN2   JSR       ADJ2     Set initial game parameters
+0106 0213 86 04                      LDAA     #4       Start with 4 guns
+0107 0215 97 ac                      STAA     KGUNS
+0108                         * INZ. FOR NEW ROUND:
+0109 0217 7c 00 b5           MAIN3   INC       ROUND    Begin next round
+0110 021a 86 18                      LDAA     #24      Alien count = 24
+0111 021c 97 ab                      STAA     KALIEN
+0112 021e 7f 00 98                   CLR       NOALFG
+0113 0221 7f 00 a8                   CLR       KSTEP
+0114 0224 bd 02 b3                   JSR       INZALA   SETUP ALIEN ARRAY
+0115 0227 bd c0 79                   JSR       ERASE
+0116 022a bd 02 cc                   JSR       SHOWAA   SHOW ALIEN ARRAY
+0117 022d 86 01                      LDAA     #1
+0118 022f 97 aa                      STAA     ALSTEP   Start with aliens stepping right
+0119 0231 86 1c                      LDAA     #$1C     Start with gun centred
+0120 0233 97 a6                      STAA     GUNPOS
+0121 0235 8d 6c                      BSR       INZMIS   Clear the missile array
+0122                         *
+0123 0237 7f 00 b2           MAIN4   CLR       CLOCK2
+0124 023a 7f 00 b1                   CLR       CLOCK1
+0125                         * START WITH JUST ALIENS MOVING (Insideous, isn't it?)
+0126 023d bd 02 f5           MAIN5   JSR       MOVALN
+0127 0240 96 a8                      LDAA     KSTEP    Move ALL aliens thru 8 steps
+0128 0242 81 08                      CMPA     #8
+0129 0244 27 04                      BEQ       MAIN6
+0130 0246 8d 45                      BSR       DELAY
+0131 0248 20 f3                      BRA       MAIN5
+0132                         *
+0133 024a bd 06 57           MAIN6   JSR       DSPGUN   Show gun turret
+0134                         * A-C-T-T-O-N !
+0135                         *
+0136 024d 96 b1              CONTRL  LDAA  CLOCK1
+0137 024f 84 01                      ANDA    #$01
+0138 0251 26 07                      BNE      CTRL1
+0139 0253 bd 03 ca                   JSR      MOVGM        Move/fire qun-missile
+0140 0256 96 98                      LDAA    NOALFG       Aliens depleted?
+0141 0258 26 bd                      BNE      MAIN3        If so, new round.
+0142                         *
+0143 025a 96 b2              CTRL1   LDAA    CLOCK2
+0144 025c 26 0a                      BNE      CTRL2
+0145 025e bd 02 f5                   JSR      MOVALN       Move next alien in turn
+0146 0261 96 9c                      LDAA    ALNDFG       Alien landed?
+0147 0263 26 35                      BNE      ENDGAM       If so. end game
+0148 0265 bd 03 9c                   JSR      MOVGUN       Move gun
+0149                         *
+0150 0268 96 b1              CTRL2   LDAA    CLOCK1
+0151 026a 84 03                      ANDA    #$03
+0152 026c 26 07                      BNE      CTRL3
+0153 026e bd 04 8d                   JSR      MVAMIS       Move (/launch) alien-missiles
+0154 0271 96 9b                      LDAA    NGFLG        Guns depleted?
+0155 0273 26 25                      BNE      ENDGAM
+0156                         *
+0157 0275 8d 16              CTRL3   BSR      DELAY
+0158 0277 96 b1                      LDAA    CLOCK1       Adjust clocks
+0159 0279 4c                         INCA
+0160 027a 81 0c                      CMPA    #12
+0161 027c 26 01                      BNE      *+3
+0162 027e 4f                         CLRA
+0163 027f 97 b1                      STAA    CLOCK1
+0164 0281 96 b2                      LDAA    CLOCK2
+0165 0283 4c                         INCA
+0166 0284 81 03                      CMPA    #3
+0167 0286 26 01                      BNE      *+3
+0168 0288 4f                         CLRA
+0169 0289 97 b2                      STAA  CLOCK2
+0170 028b 20 c0                      BRA    CONTRL
+0171                         *
+0172                         *
+0173                         * VARIABLE DELAY TO SET SAME SPFED (MDELAY*100 uSec.):
+0174 028d d6 b0              DELAY   LDAB  MDELAY
+0175 028f 86 09              DEL1    LDAA  #9
+0176 0291 01                         NOP
+0177 0292 01                 DEL2    NOP
+0178 0293 4a                         DECA
+0179 0294 26 fc                      BNE    DEL2
+0180 0296 5a                         DECB
+0181 0297 26 f6                      BNE    DEL1
+0182 0299 39                         RTS
+0183                         
+0184 029a bd 05 82           ENDGAM  JSR    STATUS     Show round, scrore, guns
+0185 029d bd c2 c4                   JSR    GETKEY     Wait for key to restart game
+0186 02a0 7e 02 00                   JMP    MAINGO
+0187                         *
+0188                         *  INITIALIZE MISSILE ARRAY:
+0189 02a3 ce 00 88           INZMIS  LDX    #MISARR
+0190 02a6 86 ff                      LDAA   #$FF
+0191 02a8 97 a5                      STAA   GMISY
+0192 02aa a7 00              INZM1   STAA   0,X
+0193 02ac 08                         INX
+0194 02ad 8c 00 90                   CPX    #MISARR+8
+0195 02b0 26 f8                      BNE    INZM1
+0196 02b2 39                         RTS
+0197                         *
+0198                         *  INITIALIZE ALIEN ARRAY FOR NEW ROUND:
+0199 02b3 ce 00 c0           INZALA  LDX     #ALNARR       point to alien array
+0200 02b6 df 90                      STX     MVAPTR        Reset 'Move Alien' pointer
+0201 02b8 4f                         CLRA
+0202 02b9 c6 28                      LDAB   #40           Do 40 times......
+0203 02bb c1 10              INZA1   CMPB   #16           Done first 24 (ie 3 rows)?
+0204 02bd 2e 02                      BGT     *+4
+0205 02bf 86 ff                      LDAA   #$FF          Last 2 rows = $FF
+0206 02c1 a7 00                      STAA   0,X
+0207 02c3 8b 08                      ADDA   #8            Next col.
+0208 02c5 84 3f                      ANDA   #$3F          For 64 dot wide screen.
+0209 02c7 08                         INX                   )
+0210 02c8 5a                         DECB                 ) Next element
+0211 02c9 26 f0                      BNE     INZA1         )
+0212 02cb 39                         RTS
+0213                         *
+0214                         * SHOW ALIENS STORED IN ARRAY:
+0215 02cc ce 00 c0           SHOWAA  LDX     #ALNARR
+0216 02cf 7f 00 a1                   CLR     ALIENY        First row; alien y = 0
+0217 02d2 c6 05                      LDAB   #5            For 5 rows....... 
+0218 02d4 37                 SHAA1   PSHB
+0219 02d5 c6 08                      LDAB   #8            For 8 cols 
+0220 02d7 37                 SHAA2   PSHB
+0221 02d8 df 92                      STX     ALAPTR
+0222 02da a6 00                      LDAA   0,X           Get x-coord
+0223 02dc 2b 05                      BMI     SHAA3        Null. forget it
+0224 02de 97 a0                      STAA   ALIENX
+0225 02e0 bd 06 67                   JSR     DSPAL        Show alien
+0226 02e3 de 92              SHAA3   LDX     ALAPTR       )
+0227 02e5 08                         INX                  )
+0228 02e6 33                         PULB                 )   Next col.
+0229 02e7 5a                         DECB                 )
+0230 02e8 26 ed                      BNE     SHAA2
+0231 02ea 96 a1                      LDAA   ALIENY        )
+0232 02ec 8b 05                      ADDA   #5            )
+0233 02ee 97 a1                      STAA   ALIENY        )   Next row.
+0234 02f0 33                         PULB                 )
+0235 02f1 5a                         DECB                 )
+0236 02f2 26 e0                      BNE     SHAA1        )
+0237 02f4 39                         RTS
+0238                         *
+0239                         *  MOVE NEXT ALIEN IN SEQUENCE:
+0240 02f5 7f 00 9d           MOVALN  CLR     KMOVE
+0241 02f8 de 90              MVA2    LDX     MVAPTR
+0242 02fa a6 00                      LDAA    0,X           Fetch alien-x
+0243 02fc 97 a0                      STAA    ALIENX
+0244 02fe 2b 23                      BMI     MVA7          Skip if  null.
+0245 0300 96 b3                      LDAA   KSHOT         Check if OK to drop down
+0246 0302 91 b4                      CMPA   NDROP
+0247 0304 2d 06                      BLT     MVA4          NO
+0248 0306 8d 4d                      BSR     DROP          Attempt to drop down 1 row
+0249 0308 96 9a                      LDAA   DROPFG        Success?
+0250 030a 26 14                      BNE     MVA6          YES
+0251 030c 8d 29              MVA4    BSR     CALCY         Compute alien y-coord
+0252 030e bd 06 67                   JSR     DSPAL         Erase alien at old coords
+0253 0311 de 90                      LDX     MVAPTR        Point to alien array
+0254 0313 a6 00                      LDAA   0,X
+0255 0315 9b aa                      ADDA   ALSTEP        Step x-coord
+0256 0317 84 3f                      ANDA   #$3F
+0257 0319 a7 00                      STAA   0,X
+0258 031b 97 a0                      STAA   ALIENX
+0259 031d bd 06 67                   JSR     DSPAL         Show alien at new coords
+0260 0320 7c 00 9d           MVA6    INC     KMOVE         Bump counter
+0261 0323 de 90              MVA7    LDX     MVAPTR        Bump Pointer
+0262 0325 08                         INX
+0263 0326 8c 00 e8                   CPX     #ALNARR+40    Done?
+0264 0329 26 05                      BNE     MVA8
+0265 032b 8d 18                      BSR     DIRECT        Set direction of alien movement
+0266 032d ce 00 c0                   LDX     #ALNARR       Reset pointer
+0267 0330 df 90              MVA8    STX     MVAPTR
+0268 0332 96 9d                      LDAA   KMOVE         Move commleted ?
+0269 0334 27 c2                      BEQ     MVA2
+0270 0336 39                         RTS
+0271                         *
+0272                         *  CALCULATE ROW (B) AND Y-COORD (A) FROM POINTER:
+0273 0337 96 91              CALCY   LDAA   MVAPTR+1
+0274 0339 44                         LSRA
+0275 033a 44                         LSRA
+0276 033b 44                         LSRA                A = row count
+0277 033c 84 07                      ANDA   #$7
+0278 033e 16                         TAB                   B = ROW
+0279 033f 48                         ASLA
+0280 0340 48                         ASLA
+0281 0341 1b                         ABA                   Y = ROW*5 (=A)
+0282 0342 97 a1                      STAA   ALIENY
+0283 0344 39                         RTS
+0284                         *
+0285                         *  SET DIRCTION OF ALIEN MOVEMENT:
+0286 0345 96 a8              DIRECT LDAA   KSTEP          Incr. step counter
+0287 0347 4c                        INCA                                                       -.
+0288 0348 97 a8                     STAA   KSTEP
+0289 034a 81 60                     CMPA   #96          Reverse if all aliens done 96 steps
+0290 034c 26 06                     BNE     DIR1
+0291 034e 7f 00 a8                  CLR     KSTEP
+0292 0351 70 00 aa                  NEG     ALSTEP
+0293 0354 39                 DIR1   RTS
+0294                         *
+0295                         * ATTEMPT TO DROP ALIEN DOWN TO LOWER ROW:
+0296 0355 7f 00 9a           DROP   CLR     DROPFG         Clear 'alien dropped' flag
+0297 0358 8d dd                     BSR     CALCY          Compute ROW (= B)
+0298 035a c1 04                     CMPB   #4             This alien on row 4 ?
+0299 035c 27 2d                     BEQ     DROP6          Yes; alien just landed! (End)
+0300 035e 96 91                     LDAA   MVAPTR+1       NO, check for clear below
+0301 0360 8b 08                     ADDA   #8
+0302 0362 97 93                     STAA   ALAPTR+1
+0303 0364 de 92                     LDX     ALAPTR         Look at next row down
+0304 0366 a6 00                     LDAA   0,X
+0305 0368 81 ff                     CMPA   #$FF           Is there a vacant slot ?
+0306 036a 26 1e                     BNE     DROP4          No; forget it.
+0307 036c de 90              DROP2  LDX     MVAPTR         Make null entry in old row
+0308 036e 86 ff                     LDAA   #$FF
+0309 0370 a7 00                     STAA   0,X
+0310 0372 bd 06 67                  JSR     DSPAL          Remove alien from old row
+0311 0375 de 92                     LDX     ALAPTR         Store x-coord in new row.
+0312 0377 96 a0                     LDAA   ALIENX
+0313 0379 a7 00                     STAA   0,X       
+0314 037b 96 a1              DROP3  LDAA   ALIENY         calc. y-coord in new row
+0315 037d 8b 05                     ADDA   #5
+0316 037f 97 a1                     STAA   ALIENY
+0317 0381 bd 06 67                  JSR     DSPAL          Show alien in new row
+0318 0384 7f 00 b3                  CLR     KSHOT          Reset shot counter
+0319 0387 7c 00 9a                  INC     DROPFG         Set 'alien dropped' flag
+0320 038a 39                 DROP4  RTS
+0321                         *
+0322                         * ALIEN LANDED; FLAG END OF GAME:
+0323 038b 7c 00 9c           DROP6  INC     ALNDFG         Set 'alien landed' flag
+0324 038e bd 06 67                  JSR     DSPAL          Remove old alien
+0325 0391 8d e8                     BSR     DROP3          Show it in new row
+0326 0393 bd 06 9a                  JSR     DSBLOT         Blot it
+0327 0396 c6 64                     LDAB   #100           Bleep 2 sec
+0328 0398 bd c2 e1                  JSR     BTONE
+0329 039b 39                        RTS
+0330                         *
+0331                         * MOVE GUN (If left or right key closed):
+0332 039c 86 01              MOVGUN LDAA   #$01           Check for LEFT key closed.
+0333 039e b5 80 10                  BITA   PIAA
+0334 03a1 26 10                     BNE     MVG2
+0335 03a3 bd 06 57                  JSR     DSPGUN         Erase gun at old x.
+0336 03a6 96 a6                     LDAA   GUNPOS
+0337 03a8 81 02                     CMPA   #$02           (Don't want GUNPOS = 0 or 1)
+0338 03aa 27 03                     BEQ     MVG1           Skip if hard left
+0339 03ac 4a                        DECA                  Move left
+0340 03ad 97 a6                     STAA   GUNPOS
+0341 03af bd 06 57           MVG1   JSR     DSPGUN         Show gun at new x.
+0342 03b2 39                        RTS
+0343                         *
+0344 03b3 86 02              MVG2   LDAA   #$02
+0345 03b5 b5 80 10                  BITA   PIAA           Check for RIGHT key closed.
+0346 03b8 26 0f                     BNE     MVG4
+0347 03ba bd 06 57                  JSR     DSPGUN
+0348 03bd 96 a6                     LDAA   GUNPOS
+0349 03bf 81 3b                     CMPA   #$3B           Skip if gun is hard right
+0350 03c1 2c 03                     BGE     MVG3
+0351 03c3 4c                        INCA                  Move right
+0352 03c4 97 a6                     STAA   GUNPOS
+0353 03c6 bd 06 57           MVG3   JSR     DSPGUN
+0354 03c9 39                 MVG4   RTS
+0355                         *
+0356                         *MOVE GUN MISSILE; TEST FOR HIT:
+0357 03ca 96 a5              MOVGM  LDAA   GMISY          See if missile active
+0358 03cc 2b 10                     BMI     MGM2
+0359 03ce 27 16                     BEQ     DISAGM         Disable if top of screen.
+0360 03d0 bd 06 3c                  JSR     DSPGM          Move UP 1 unit.
+0361 03d3 7a 00 a5                  DEC     GMISY
+0362 03d6 bd 06 3c                  JSR     DSPGM
+0363 03d9 96 3f                     LDAA   HITFLG         Hit anything?
+0364 03db 26 22                     BNE     MGM4           Yes.
+0365 03dd 39                        RTS
+0366 03de 86 08              MGM2   LDAA   #$08           FIRE button pressed?
+0367 03e0 b5 80 10                  BITA   PIAA
+0368 03e3 27 09                     BEQ     FIREGM
+0369 03e5 39                        RTS
+0370                         *
+0371                         * DISABLE GUN MISSILE:
+0372 03e6 bd 06 3c           DISAGM JSR     DSPGM          Erase missile
+0373 03e9 86 ff              DGM1   LDAA   #$FF
+0374 03eb 97 a5                     STAA   GMISY          Store null code.
+0375 03ed 39                        RTS
+0376                         *
+0377                         * FIRE GUN MISSILE:
+0378 03ee 96 a6              FIREGM LDAA   GUNPOS
+0379 03f0 8b 02                     ADDA   #2             = centre of gun
+0380 03f2 97 a4                     STAA   GMISX
+0381 03f4 86 1b                     LDAA   #$1B
+0382 03f6 97 a5                     STAA   GMISY
+0383 03f8 bd 06 3c                  JSR     DSPGM          Show missile
+0384 03fb 7c 00 b3                  INC     KSHOT          Bump shot counter
+0385 03fe 39                        RTS
+0386                         *
+0387                         * DETERMINE WHAT GUN MISSILE INTERCEPTED:
+0388 03ff ce 00 88           MGM4   LDX     #MISARR        Was it an alien missile?
+0389 0402 a6 00              MGM5   LDAA   0,X
+0390 0404 91 a4                     CMPA   GMISX          Compare missile coords.
+0391 0406 26 06                     BNE     MGM6
+0392 0408 a6 01                     LDAA   1,X
+0393 040a 91 a5                     CMPA   GMISY
+0394 040c 27 0a                     BEQ     MGM8           Yes, hit missile.
+0395 040e 08                 MGM6   INX                    No, try next missile.
+0396 040f 08                        INX
+0397 0410 8c 00 90                  CPX     #MISARR+8 
+0398 0413 26 ed                     BNE     MGM5
+0399 0415 8d 0d                     BSR     HITALN         Must have hit alien
+0400 0417 39                        RTS
+0401                         *
+0402                         * GUN MISSILE HITS ALIEN MISSILE:
+0403 0418 86 ff              MGM8   LDAA   #$FF           Kill alien missile
+0404 041a a7 00                     STAA   0,X
+0405 041c a7 01                     STAA   1,X
+0406 041e bd 06 81                  JSR     DISMIS         Display missile collision
+0407 0421 8d c6                     BSR     DGM1           Disable gun missile 
+0408 0423 39                        RTS
+0409                         *
+0410                         * SEARCH ALIEN ARRAY FOR X-COORD OF HIT ALIEN: 
+0411 0424 96 a5              HITALN LDAA   GMISY          Get gun missile y-coord. 
+0412 0426 c6 05                     LDAB   #5
+0413 0428 bd 06 2b                  JSR     DIV            A=A/5 = row of #
+0414 042b 16                        TAB                    Alien-Y-coord = row x 5
+0415 042c 48                        ASLA
+0416 042d 48                        ASLA
+0417 042e 1b                        ABA
+0418 042f 97 a1                     STAA   ALIENY
+0419 0431 17                        TBA                    Compute array pointer
+0420 0432 48                        ASLA 
+0421 0433 48                        ASLA 
+0422 0434 48                        ASLA 
+0423 0435 8a c0                     ORAA   #$C0
+0424 0437 97 93                     STAA   ALAPTR+1       Search this row....
+0425 0439 c6 08                     LDAB    #8           For 8 columns............
+0426 043b de 92              HIT2   LDX     ALAPTR 
+0427 043d a6 00                     LDAA   0,X            Get alien-x 
+0428 043f 2b 0b                     BMI     HIT3           Skip if null
+0429 0441 96 a4                     LDAA   GMISX          Get gun missile x-coord. 
+0430 0443 a0 00                     SUBA   0,X            Subtract alien missile x.
+0431 0445 2a 01                     BPL     *+3            Convert to absolute value
+0432 0447 40                        NEGA
+0433 0448 81 04                     CMPA   #4             Diff <= 4?
+0434 044a 2f 07                     BLE     HIT4           Yes. found the sucker! 
+0435 044c 7c 00 93           HIT3   INC     ALAPTR+1       No, try next col.
+0436 044f 5a                        DECB
+0437 0450 26 e9                     BNE    HIT2
+0438 0452 39                        RTS                    Search failed; forget it
+0439                         *
+0440                         * EXTERMINATE HIT ALIEN:
+0441 0453 a6 00              HIT4    LDAA   0,X            Get its x-coord.
+0442 0455 97 a0                      STAA   ALIENX
+0443 0457 86 ff                      LDAA   #$FF
+0444 0459 a7 00                      STAA   0,X            Deposit null code in array.
+0445 045b bd 03 e6                   JSR     DISAGM         Disable gun missile.
+0446 045e c6 01                      LDAB   #1
+0447 0460 bd 05 e4                   JSR     PAUSE          Wait  for RTC tick
+0448 0463 bd 06 9a                   JSR     DSBLOT         Blot alien
+0449 0466 c6 03                      LDAB   #3
+0450 0468 bd c2 e1                   JSR     BTONE          Bleep for 60 mSec
+0451 046b bd 06 9a                   JSR     DSBLOT         Remove blot
+0452 046e bd 06 67                   JSR     DSPAL          Remove alien
+0453                         *
+0454                         * ADJUST SCORER DIFFICULTY LEVEL, ETC:
+0455 0471 bd 05 f1           HIT5    JSR     ADJUST
+0456 0474 7a 00 ab                   DEC     KALIEN
+0457 0477 27 01                      BEQ     HIT6
+0458 0479 39                         RTS
+0459                         *
+0460                         * ALL ALIENS DEPLETED; END OF ROUND:
+0461 047a 7c 00 98           HIT6    INC     NOALFG        Set 'aliens depleted' flag
+0462 047d 96 b5                      LDAA   ROUND         Add bonus 2 guns at....
+0463 047f 81 0a                      CMPA   #10           ....end of round 10
+0464 0481 26 06                      BNE     *+8
+0465 0483 7c 00 ac                   INC     KGUNS
+0466 0486 7c 00 ac                   INC     KGUNS
+0467 0489 bd 05 82                   JSR     STATUS        Show round, score, guns.
+0468 048c 39                         RTS
+0469                         * 
+0470                         *   ALIEN MISSILE MANAGEMENT; MOVE ALIEN MISSILES:
+0471 048d 7f 00 99           MVAMIS  CLR     LFLAG          Reset 'launch' flag.
+0472 0490 ce 00 88                   LDX     #MISARR
+0473 0493 d6 af                      LDAB   NMISS          For (N) missiles.........
+0474 0495 d7 ae              MVM1    STAB   KMISS 
+0475 0497 df 94                      STX     MISPTR
+0476 0499 a6 00                      LDAA   0,X            Get missile(I) x-coord.
+0477 049b 97 a2                      STAA   AMISX
+0478 049d 2b 2c                      BMI     MVM4           Null; try a launch.
+0479 049f a6 01                      LDAA   1,X            Get missile(I) Y-coord.
+0480 04a1 97 a3                      STAA   AMISY
+0481 04a3 81 1f                      CMPA   #$1F           Is it at bottom of screen?
+0482 04a5 27 30                      BEQ     MVM8
+0483 04a7 bd 06 4f           MVM2    JSR     DSPALM         Erase from old Pos'n.
+0484 04aa de 94                      LDX     MISPTR
+0485 04ac 7c 00 a3                   INC     AMISY          Show in new pos'n.
+0486 04af 96 a3                      LDAA   AMISY
+0487 04b1 a7 01                      STAA   1,X
+0488 04b3 bd 06 4f                   JSR     DSPALM
+0489 04b6 96 3f                      LDAA   HITFLG         Hit anything?
+0490 04b8 27 07                      BEQ     MVM3           if not.
+0491 04ba bd 04 e7                   JSR     DSTROY         if so: destroy it.
+0492 04bd 96 9b                      LDAA   NGFLG          Guns depleted?
+0493 04bf 26 09                      BNE     MVMR           If so, return
+0494 04c1 de 94              MVM3    LDX     MISPTR         )
+0495 04c3 08                         INX                    )
+0496 04c4 08                         INX                    ) next missile
+0497 04c5 d6 ae                      LDAB   KMISS          )
+0498 04c7 5a                         DECB                  )
+0499 04c8 26 cb                      BNE     MVM1           )
+0500 04ca 39                 MVMR    RTS 
+0501                         *
+0502                         *   TEST FOR 'CLEAR-TO-LAUNCH' CONDITION:
+0503 04cb 96 99              MVM4    LDAA   LFLAG          Already launched 1 this cycle?
+0504 04cd 26 f2                      BNE     MVM3           Yes: next I.
+0505 04cf 96 b1                      LDAA   CLOCK1         Launch every 12th control cycle
+0506 04d1 26 ee                      BNE     MVM3
+0507 04d3 8d 58                      BSR     LAUNCH
+0508 04d5 20 ea                      BRA     MVM3           Next missile.
+0509                         *
+0510                         *   DE-ACTIVATE ALIEN MISSILE:
+0511 04d7 8d 02              MVM8    BSR     KILALM 
+0512 04d9 20 e6                      BRA     MVM3
+0513                         *
+0514 04db bd 06 4f           KILALM  JSR     DSPALM         Erase it 
+0515 04de de 94              KIL1    LDX     MISPTR
+0516 04e0 86 ff                      LDAA   #$FF
+0517 04e2 a7 00                      STAA   0,X            Store null code.
+0518 04e4 a7 01                      STAA   1,X
+0519 04e6 39                         RTS
+0520                         *
+0521                         * DESTROY OBJECT HIT BY ALIEN MISSILE:
+0522 04e7 96 a4              DSTROY  LDAA    GMISX  Check for missile/missile hit
+0523 04e9 91 a2                      CMPA    AMISX
+0524 04eb 26 0f                      BNE      DST1
+0525 04ed 96 a5                      LDAA    GMISY
+0526 04ef 91 a3                      CMPA    AMISY
+0527 04f1 26 09                      BNE      DST1         No; try gun
+0528 04f3 8d e9                      BSR      KIL1         Yes; kill missiles.
+0529 04f5 bd 06 81                   JSR      DISMIS       Show missiles exploding.
+0530 04f8 bd 03 e9                   JSR      DGM1         Disable gun missile.
+0531 04fb 39                         RTS
+0532                         
+0533 04fc 96 a3              DST1    LDAA    AMISY        Check for gun-turret hit
+0534 04fe 81 1c                      CMPA    #$1C
+0535 0500 2c 01                      BGE      KILGUN
+0536 0502 39                         RTS
+0537                         *
+0538                         * DESTROY GUN-TURRET;
+0539 0503 8d d6              KILGUN  BSR     KILALM        First remove alien missile
+0540 0505 bd 06 ac                   JSR     DSPCLD        Show 'cloud' on dead gun-turret
+0541 0508 bd 06 cb                   JSR     INVERT        FLASH, ETC
+0542 050b c6 64                      LDAB   #100
+0543 050d d7 21                      STAB   TONE
+0544 050f c6 40                      LDAB   #$40
+0545 0511 bd c2 e5                   JSR     BTON          Make sound
+0546 0514 7a 00 ac                   DEC     KGUNS         Decrement gun count
+0547 0517 2e 04                      BGT     KILG1
+0548 0519 7c 00 9b                   INC     NGFLG         If no guns, set flag.
+0549 051c 39                         RTS
+0550                         *
+0551 051d bd 05 82           KILG1   JSR    STATUS         Show score, pause.
+0552 0520 bd c0 79                   JSR    ERASE          Clear screen
+0553 0523 bd 02 a3                   JSR    INZMIS         Remove missiles.
+0554 0526 bd 02 cc                   JSR    SHOWAA         Replace aliens
+0555 0529 bd 06 57                   JSR    DSPGUN         Replace gun
+0556 052c 39                         RTS
+0557                         *
+0558                         *   LAUNCH ALIEN MISSILE;  CH0OSE AT RANDOM:
+0559 052d bd c1 32           LAUNCH  JSR      RANDOM         Select random col.
+0560 0530 c6 08                      LDAB    #8             For 8 columns............
+0561 0532 37                 AML1    PSHB
+0562 0533 84 07                      ANDA    #7
+0563 0535 97 97                      STAA    COL
+0564 0537 86 20                      LDAA    #$20
+0565 0539 c6 05                      LDAB    #5             For 5 rows (max)....,....
+0566 053b 37                 AML2    PSHB
+0567 053c 97 96                      STAA    ROW            Compute pointer from ROW,COL.
+0568 053e 9a 97                      ORAA    COL
+0569 0540 8a c0                      ORAA    #$C0
+0570 0542 97 93                      STAA    ALAPTR+1
+0571 0544 de 92                      LDX      ALAPTR
+0572 0546 a6 00                      LDAA    0,X              Fetch alien x (or null)
+0573 0548 2a 18                      BPL      AML3           If not $ff, we have alien to find
+0574 054a 96 96                      LDAA    ROW            )
+0575 054c 80 08                      SUBA    #8             )
+0576 054e 33                         PULB                   ) next ROW up...
+0577 054f 5a                         DECB                   )
+0578 0550 26 e9                      BNE      AML2
+0579 0552 96 97                      LDAA    COL
+0580 0554 d6 b3                      LDAB    KSHOT          Try next col left or right....
+0581 0556 c4 01                      ANDB    #$01           ...depending on KSHOT! ...
+0582 0558 27 02                      BEQ      *+4            ...(flgure that one out !!)
+0583 055a 4a                         DECA
+0584 055b 4a                         DECA
+0585 055c 4c                         INCA                   )
+0586 055d 33                         PULB                   )   next column
+0587 055e 5a                         DECB                   )
+0588 055f 26 d1                      BNE      AML1           )
+0589 0561 39                         RTS                     Search failed; forget it.
+0590                         *
+0591 0562 33                 AML3    PULB                   Re-adjust stack
+0592 0563 33                         PULB
+0593 0564 8b 02                      ADDA    #2             Missile-x is centre of alien
+0594 0566 97 a2                      STAA    AMISX
+0595 0568 de 94                      LDX      MISPTR
+0596 056a a7 00                      STAA    0,X              Store new missile in array
+0597 056c 96 96                      LDAA    ROW
+0598 056e 44                         LSRA
+0599 056f 44                         LSRA
+0600 0570 44                         LSRA
+0601 0571 16                         TAB                     Mult. A by 5 giving y-coord.
+0602 0572 48                         ASLA
+0603 0573 48                         ASLA
+0604 0574 1b                         ABA
+0605 0575 8b 03                      ADDA    #3             ..... + 3
+0606 0577 97 a3                      STAA    AMISY
+0607 0579 a7 01                      STAA    1,X
+0608 057b bd 06 4f                   JSR      DSPALM         Show alien missile here
+0609 057e 7c 00 99                   INC      LFLAG          Set 'launch' flag
+0610 0581 39                 		RTS
+0611                         *
+0612                         * SHOW STATUS --- ROUND, SCORE, GUNS:
+0613 0582 4f                 STATUS  CLRA             Make display 'window'
+0614 0583 ce 01 c0                   LDX       #DISBUF+192
+0615 0586 bd c0 7d                   JSR       FILL
+0616 0589 43                         COMA
+0617 058a ce 01 c8                   LDX       #DISBUF+200
+0618 058d bd c0 7d                   JSR       FILL
+0619 0590 86 10                      LDAA     #$10      Put gaps in window (3 fields)
+0620 0592 bd 06 bd                   JSR       DSPGAP
+0621 0595 86 2c                      LDAA     #$2C
+0622 0597 bd 06 bd                   JSR       DSPGAP
+0623                         *
+0624 059a 86 04                      LDAA    #4
+0625 059c bd c3 e0                   JSR       CURS1     Set  'invisible cursor' posn
+0626 059f 96 b5                      LDAA    ROUND     Convert ROUND to decimal
+0627 05a1 ce 00 b6                   LDX       #DECIM    Point  to workspace
+0628 05a4 bd c1 e0                   JSR       DECEQ
+0629 05a7 ce 00 b7                   LDX       #DECIM+1
+0630 05aa 8d 40                      BSR       DISDIG    Show 'tens'
+0631 05ac 08                         INX
+0632 05ad 8d 3d                      BSR       DISDIG    Show  'units'
+0633 05af 86 18                      LDAA    #$18      Convert & show SCORE x 10
+0634 05b1 bd c3 e0                   JSR       CURS1
+0635 05b4 96 a7                      LDAA    SCORE
+0636 05b6 ce 00 b6                   LDX       #DECIM
+0637 05b9 bd c1 e0                   JSR       DECEQ
+0638 05bc 4f                         CLRA
+0639 05bd a7 00                      STAA    0,X
+0640 05bf ce 00 b6                   LDX       #DECIM
+0641 05c2 c6 04                      LDAB    #4
+0642 05c4 37                 STAT2   PSHB
+0643 05c5 8d 25                      BSR       DISDIG
+0644 05c7 08                         INX
+0645 05c8 33                         PULB
+0646 05c9 5a                         DECB
+0647 05ca 26 f8                      BNE       STAT2
+0648 05cc 86 33                      LDAA    #$33      Show guns remaining
+0649 05ce bd c3 e0                   JSR       CURS1
+0650 05d1 ce 00 ac                   LDX       #KGUNS
+0651 05d4 8d 16                      BSR       DISDIG
+0652 05d6 86 39                      LDAA    #$39      Show gun symbol
+0653 05d8 97 2e                      STAA    VX
+0654 05da ce 06 d8                   LDX       #GUN
+0655 05dd c6 04                      LDAB    #4
+0656 05df bd c2 26                   JSR       SHOWX
+0657 05e2 c6 c8                      LDAB    #200      Pause for 4 seconds...
+0658                         *
+0659                         * PAUSE:  Wait for the Nth RTC interrupt (N = B-reg):
+0660 05e4 d7 20              PAUSE   STAB    TIME 
+0661 05e6 7d 00 20           PSE1    TST       TIME
+0662 05e9 26 fb                      BNE       PSE1
+0663 05eb 39                         RTS
+0664                         *
+0665                         * DISPLAY BCD DIGIT (LSD) OF BYTE 0 X:
+0666 05ec a6 00              DISDIG  LDAA  0,X
+0667 05ee 7e c3 d2                   JMP   DIGOUT Use monitor display routine
+0668                         *
+0669                         * ADJUST DIFFICULTY LEVEL OF PLAY: 
+0670 05f1 96 a7              ADJUST  LDAA SCORE   BUMP score
+0671 05f3 81 fa                      CMPA #250   Stop at 250 !
+0672 05f5 27 03                      BEQ   ADJ2
+0673 05f7 7c 00 a7                   INC  SCORE
+0674                         *
+0675                         * COMPUTE MDELAY = MDMAX - SCORE/(255/(MDMAX-MDMIN))
+0676 05fa c6 28              ADJ2    LDAB  #$28   [ Maximum-Minimum delay ]
+0677 05fc 86 ff                      LDAA  #255
+0678 05fe bd 06 2b                   JSR   DIV
+0679 0601 16                         TAB
+0680 0602 96 a7                      LDAA SCORE
+0681 0604 bd 06 2b                   JSR   DIV
+0682 0607 16                         TAB
+0683 0608 86 40                      LDAA #$40   [ Maximum de1ay ]
+0684 060a 10                         SBA
+0685 060b 97 b0                      STAA MDELAY
+0686                         *
+0687                         * COMPUTE DROP RATE; NDROP = (250 - SCORE)/64 + 1:
+0688 060d 86 fa                      LDAA #250
+0689 060f 90 a7                      SUBA SCORE
+0690 0611 c6 40                      LDAB #64
+0691 0613 bd 06 2b                   JSR   DIV
+0692 0616 8b 01                      ADDA #1
+0693 0618 97 b4                      STAA NDROP
+0694                         *
+0695                         * COMPUTE NMISS = 2, 3 OR 4; depending on which round:
+0696 061a 86 04                      LDAA #4
+0697 061c d6 b5                      LDAB ROUND
+0698 061e c1 06                      CMPB #6
+0699 0620 2c 06                      BGE   ADJ3
+0700 0622 4a                         DECA
+0701 0623 c1 03                      CMPB #3
+0702 0625 2c 01                      BGE   ADJ3
+0703 0627 4a                         DECA
+0704 0628 97 af              ADJ3    STAA NMISS
+0705 062a 39                         RTS
+0706                         *
+0707                         * DIVIDE A BY B;   8-BITS UNSIGNED; (SLOW);
+0708 062b 7f 00 ad           DIV      CLR     QUOT
+0709 062e 5d                          TSTB
+0710 062f 27 08                       BEQ     DIV2     Dividing by 0 !!!?
+0711 0631 10                 DIV1     SBA              Compare A with B.   (A-B)
+0712 0632 25 05                       BCS     DIV2     Branch if A was LOWER (unsigned)
+0713 0634 7c 00 ad                    INC     QUOT
+0714 0637 20 f8                       BRA     DIV1
+0715 0639 96 ad              DIV2     LDAA   QUOT
+0716 063b 39                          RTS
+0717                         *
+0718                         * DISPLAY/ERASE GUN MISSILE:
+0719 063c 96 a4              DSPGM    LDAA   GMISX
+0720 063e 97 2e                       STAA   VX
+0721 0640 96 a5                       LDAA   GMISY
+0722 0642 97 2f              DSPM1    STAA   VY
+0723 0644 c6 01                       LDAB   #1
+0724 0646 ce 06 d7                    LDX     #MISILE
+0725 0649 7f 00 3f                    CLR     HITFLG   Reset  'overlap' flag.
+0726 064c 7e c2 26                    JMP     SHOWX    Jump to CHIPOS show routine
+0727                         *
+0728                         * DISPLAY/ERASE  ALIEN MISILE:
+0729 064f 96 a2              DSPALM   LDAA   AMISX
+0730 0651 97 2e                       STAA   VX
+0731 0653 96 a3                       LDAA   AMISY
+0732 0655 20 eb                       BRA     DSPM1
+0733                         *
+0734                         * DISPLAY/ERASE  GUN-TURRET:
+0735 0657 96 a6              DSPGUN   LDAA   GUNPOS
+0736 0659 97 2e                       STAA   VX
+0737 065b 86 1c                       LDAA   #$1C
+0738 065d 97 2f                       STAA   VY
+0739 065f c6 04                       LDAB   #4
+0740 0661 ce 06 d8                    LDX     #GUN
+0741 0664 7e c2 26                    JMP     SHOWX
+0742                         *
+0743                         * DISPLAY/ERASE ALIEN:
+0744 0667 c6 04              DSPAL    LDAB   #4
+0745 0669 96 a1                       LDAA   ALIENY
+0746 066b 97 2f                       STAA   VY
+0747 066d 96 a0                       LDAA   ALIENX
+0748 066f 97 2e                       STAA   VX
+0749 0671 84 01                       ANDA   #1       Test for odd or even x coord
+0750 0673 27 06                       BEQ     DSPAL1
+0751 0675 ce 06 e0                    LDX    #ALIEN2
+0752 0678 7e c2 26                    JMP     SHOWX    Shcw alien  type I (odd x)
+0753 067b ce 06 dc           DSPAL1   LDX     #ALIEN1
+0754 067e 7e c2 26                    JMP     SHOWX    Show alien type 2 (even x)
+0755                         
+0756                         *  DISPLAY MISSILE/MISSILE COLLISION:
+0757 0681 8d 05              DISMIS   BSR      DISM1     Show fragments
+0758 0683 c6 02                       LDAB    #2
+0759                         
+0760 0685 bd 05 e4                    JSR     PAUSE     Delay 20 - 40 mSec.
+0761 0688 96 a4              DISM1    LDAA   GMISX     Use gun missile coords
+0762 068a 4a                          DECA
+0763 068b 97 2e                       STAA  VX
+0764 068d 96 a5                       LDAA  GMISY
+0765 068f 4a                          DECA
+0766 0690 97 2f                       STAA  VY
+0767 0692 c6 03                       LDAB  #3
+0768 0694 ce 06 ea                    LDX     #FRAGM
+0769 0697 7e c2 26                    JMP     SHOWX
+0770                         *
+0771                         *  DISPLAY/ERASE 'BLOT' ON DECEASED ALIEN:
+0772 069a 96 a0              DSBLOT   LDAA    ALIENX
+0773 069c 4a                          DECA
+0774 069d 97 2e                       STAA    VX
+0775 069f 96 a1                       LDAA    ALIENY
+0776 06a1 4a                          DECA
+0777 06a2 97 2f                       STAA    VY
+0778 06a4 c6 06                       LDAB    #6
+0779 06a6 ce 06 e4                    LDX       #BLOT
+0780 06a9 7e c2 26                    JMP       SHOWX
+0781                         *
+0782                         *  DISPLAY/ERASE 'CLOUD' OVER HIT GUN-TURRET:
+0783 06ac 96 a6              DSPCLD   LDAA     GUNPOS
+0784 06ae 4a                          DECA
+0785 06af 97 2e                       STAA     VX
+0786 06b1 86 1b                       LDAA     #$1B
+0787 06b3 97 2f                       STAA     VY
+0788 06b5 c6 05                       LDAB     #5
+0789 06b7 ce 06 ed                    LDX       #CLOUD 
+0790 06ba 7e c2 26                    JMP       SHOWX
+0791                         *
+0792                         *  SHOW  GAP IN DISPLAY WINDOW:
+0793 06bd 97 2e              DSPGAP    STAA     VX
+0794 06bf 86 19                        LDAA     #$19
+0795 06c1 97 2f                        STAA     VY
+0796 06c3 c6 07                        LDAB     #7
+0797 06c5 ce 06 f2                     LDX       #GAP
+0798 06c8 7e c2 26                     JMP       SHOWX
+0799                         *
+0800                         *  INVERT VIDEO,    FULL SCREEN:
+0801 06cb ce 01 00           INVERT    LDX       #DISBUF
+0802 06ce 63 00              INV1      COM       0,X
+0803 06d0 08                           INX
+0804 06d1 8c 02 00                     CPX       #ENDBUF
+0805 06d4 26 f8                        BNE       INV1 
+0806 06d6 39                           RTS
+0807                         *
+0808                         *
+0809                         * SYMBOL PATTERNS:
+0810 06d7 80                 MISILE   FCB      $80
+0811 06d8 20 70              GUN      FDB      $2070
+0812 06da f8 88                       FDB      $F888
+0813                         		 
+0814 06dc f8 a8              ALIEN1   FDB      $F8A8
+0815 06de f8 50                       FDB      $F850
+0816                         		 
+0817 06e0 f8 a8              ALIEN2   FDB      $F8A8
+0818 06e2 f8 88                       FDB      $F888
+0819                         		 
+0820 06e4 7c fe              BLOT     FDB      $7CFE
+0821 06e6 fe fe                       FDB      $FEFE
+0822 06e8 fe 6c                       FDB      $FE6C
+0823                         		 
+0824 06ea a0 40              FRAGM    FDB      $A040
+0825 06ec a0                          FCB      $A0
+0826                         		 
+0827 06ed 38 7c              CLOUD    FDB      $387C
+0828 06ef fe fe                       FDB      $FEFE
+0829 06f1 fe                          FCB      $FE
+0830 06f2 f0 f0              GAP      FDB      $F0F0
+0831 06f4 f0 f0                       FDB      $F0F0
+0832 06f6 f0 f0                       FDB      $F0F0
+0833 06f8 f0 f0                       FDB      $F0F0
+0834                         *
+0835                         *
+0836                         *
+0837                         *  CHECKSUM VERIFY ROUTINE:
+0838 0700                             ORG      $0700
+0839 0700 ce 02 00           VERIFY   LDX      #$0200
+0840 0703 4f                          CLRA
+0841 0704 e6 00              VER1     LDAB    0,X
+0842 0706 1b                          ABA
+0843 0707 08                          INX
+0844 0708 8c 07 00                    CPX      #$0700
+0845 070b 26 f7                       BNE      VER1
+0846 070d 97 ff                       STAA    $00FF
+0847 070f 7e c3 60                    JMP      $C360
+0848                                  END
+ADJ2       05fa
+ADJ3       0628
+ADJUST     05f1
+ALAPTR     0092
+ALIEN1     06dc
+ALIEN2     06e0
+ALIENX     00a0
+ALIENY     00a1
+ALNARR     00c0
+ALNDFG     009c
+ALSTEP     00aa
+AMISX      00a2
+AMISY      00a3
+AML1       0532
+AML2       053b
+AML3       0562
+BLOT       06e4
+BTON       c2e5
+BTONE      c2e1
+CALCY      0337
+CLOCK1     00b1
+CLOCK2     00b2
+CLOUD      06ed
+COL        0097
+CONTRL     024d
+CTRL1      025a
+CTRL2      0268
+CTRL3      0275
+CURS1      c3e0
+DECEQ      c1e0
+DECIM      00b6
+DEL1       028f
+DEL2       0292
+DELAY      028d
+DGM1       03e9
+DIGOUT     c3d2
+DIR1       0354
+DIRECT     0345
+DISAGM     03e6
+DISBUF     0100
+DISDIG     05ec
+DISM1      0688
+DISMIS     0681
+DIV        062b
+DIV1       0631
+DIV2       0639
+DROP       0355
+DROP2      036c
+DROP3      037b
+DROP4      038a
+DROP6      038b
+DROPFG     009a
+DSBLOT     069a
+DSPAL      0667
+DSPAL1     067b
+DSPALM     064f
+DSPCLD     06ac
+DSPGAP     06bd
+DSPGM      063c
+DSPGUN     0657
+DSPM1      0642
+DST1       04fc
+DSTROY     04e7
+ENDBUF     0200
+ENDGAM     029a
+ERASE      c079
+FILL       c07d
+FIREGM     03ee
+FRAGM      06ea
+GAP        06f2
+GETKEY     c2c4
+GMISX      00a4
+GMISY      00a5
+GUN        06d8
+GUNPOS     00a6
+HIT2       043b
+HIT3       044c
+HIT4       0453
+HIT5       0471
+HIT6       047a
+HITALN     0424
+HITFLG     003f
+INV1       06ce
+INVERT     06cb
+INZA1      02bb
+INZALA     02b3
+INZM1      02aa
+INZMIS     02a3
+KALIEN     00ab
+KGUNS      00ac
+KIL1       04de
+KILALM     04db
+KILG1      051d
+KILGUN     0503
+KMISS      00ae
+KMOVE      009d
+KSHOT      00b3
+KSTEP      00a8
+LAUNCH     052d
+LFLAG      0099
+MAIN1      0208
+MAIN2      0210
+MAIN3      0217
+MAIN4      0237
+MAIN5      023d
+MAIN6      024a
+MAINGO     0200
+MDELAY     00b0
+MGM2       03de
+MGM4       03ff
+MGM5       0402
+MGM6       040e
+MGM8       0418
+MISARR     0088
+MISILE     06d7
+MISPTR     0094
+MOVALN     02f5
+MOVGM      03ca
+MOVGUN     039c
+MVA2       02f8
+MVA4       030c
+MVA6       0320
+MVA7       0323
+MVA8       0330
+MVAMIS     048d
+MVAPTR     0090
+MVG1       03af
+MVG2       03b3
+MVG3       03c6
+MVG4       03c9
+MVM1       0495
+MVM2       04a7
+MVM3       04c1
+MVM4       04cb
+MVM8       04d7
+MVMR       04ca
+NDROP      00b4
+NGFLG      009b
+NMISS      00af
+NMOVE      00a9
+NOALFG     0098
+PAINZ      c287
+PAUSE      05e4
+PIAA       8010
+PIAB       8012
+PSE1       05e6
+QUOT       00ad
+RANDOM     c132
+ROUND      00b5
+ROW        0096
+SCORE      00a7
+SHAA1      02d4
+SHAA2      02d7
+SHAA3      02e3
+SHOWAA     02cc
+SHOWX      c226
+STAT2      05c4
+STATUS     0582
+TIME       0020
+TONE       0021
+VER1       0704
+VERIFY     0700
+VF         003f
+VX         002e
+VY         002f
