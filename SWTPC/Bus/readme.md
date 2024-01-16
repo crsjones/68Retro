@@ -2,7 +2,7 @@
 
 The SS-50 and SS-30 busses have been changed to reduce the size and make them more suitable for prototyping with breadboard and Dupont cables.
 
-1. Connector pitch changed to 0.1" from 0.153".
+1. Connector pitch changed to 0.1" from 0.156".
 
 2. Change power supply requirement to 5V only.
 3. Remove the Baud Rate Generator from the Bus.

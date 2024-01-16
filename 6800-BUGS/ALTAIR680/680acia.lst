@@ -1,0 +1,287 @@
+output:  680acia.s19
+0001                         ;     Nam Prom Monitor
+0002                         ; edited Herb Johnson July 2020 from deramp.com file
+0003                         ;**
+0004                         ;**altair 680b Prom Monitor
+0005                         ;**acia Version 1.0
+0006                         ;**
+0007 0100                    Mivec       Equ   $100
+0008 0104                    Nmivec      Equ   $104
+0009 f002                    Straps      Equ   $f002
+0010 0000                    Noterm      Equ   $0000
+0011 f000                    Aciacs      Equ   $f000
+0012 f001                    Aciada      Equ   $f001
+0013                         ;**
+0014                         ;**monitor Stack And Flags
+0015                         ;**
+0016 00f1                          Org $f1
+0017 00f1                    Stack       Rmb 1       ;bottom Of Monitor's Stack
+0018 00f2                    Brkadr      Rmb 1       ;breakpoint Address Flag
+0019 00f3                    Echo        Rmb 1       ;tty Echo Flag
+0020 00f4                    Extflg      Rmb 1       ;entended Character Flag
+0021 00f5                    Bufull      Rmb 1       ;buffer Full Flag
+0022 00f6                    Savstk      Rmb 2       ;temp For Stack Pointer
+0023 00f8                    Temp        Rmb 1       ;temporary Storage
+0024 00f9                    Bytect      Rmb 1       ;byte Count
+0025 00fa                    Xhi         Rmb 1       ;xreg High
+0026 00fb                    Xlow        Rmb 1       ;xreg Low
+0027 00fc                    Shift       Rmb 1       ;baudot Shift Flag
+0028 00fd                    Savex       Rmb 2       ;temp For Index Rg
+0029 00ff                    Buffer      Rmb 1       ;baudot Character Flag
+0030                         ;**
+0031                         ;* Start Of Prom
+0032                         ;**
+0033 ff00                          Org $ff00
+0034                         ;**
+0035                         ;* Input One Char Into A-register
+0036                         ;* Echo Character If Bit 7 Of Echo Flag Is Clear
+0037                         ;**
+0038 ff00 8d 22              Inch  Bsr   Polcat      ;acia Statuc To A Reg
+0039 ff02 24 fc                    Bcc   Inch        ;receive Not Ready
+0040 ff04 c6 7f                    LdaB #$7f     ;mask For Parity Removal
+0041 ff06 d1 f3                    CmpB  Echo     ;check Echo Flag
+0042 ff08 f4 f0 01                 AndB  Aciada   ;get Character
+0043 ff0b 24 74                    Bcc   Outch       ;echo
+0044 ff0d 39                       Rts               ;no Echo
+0045                         ;**
+0046                         ;* The Following Nop Lines Lines Up The Entry
+0047                         ;* Points To Polcat In The Two Versions
+0048                         ;* Of The Monitor
+0049                         ;**
+0050 ff0e 01                       Nop
+0051                         ;**
+0052                         ;* Input One Hex Digit Into B Reg
+0053                         ;* Return To Calling Program If
+0054                         ;* Character Received Is A Hex
+0055                         ;* Digit. If Not Hex, Go To Crlf
+0056                         ;**
+0057 ff0f 8d ef              Inhex Bsr   Inch        ;get A Character
+0058 ff11 c0 30                    SubB  #'0'
+0059 ff13 2b 3c                    Bmi   C1          ;not Hex
+0060 ff15 c1 09                    CmpB  #$09
+0061 ff17 2f 0a                    Ble   In1hg       ;not Hex
+0062 ff19 c1 11                    CmpB  #$11
+0063 ff1b 2b 34                    Bmi   C1          ;not Hex 
+0064 ff1d c1 16                    CmpB  #$16
+0065 ff1f 2e 30                    Bgt   C1          ;not Hex
+0066 ff21 c0 07                    SubB  #$07     ;it's A Letter-get Bcd
+0067 ff23 39                 In1hg Rts               ;return
+0068                         ;**
+0069                         ;* Pole For Character
+0070                         ;* Sets Carry If Character Is In Buffer
+0071                         ;* Clobbers 8 Reg
+0072                         ;**
+0073 ff24 f6 f0 00           Polcat LdaB  Aciacs   ;acia Status T0 B
+0074 ff27 57                       Asrb              ;rotate Rdrf Bit Into Carry
+0075 ff28 39                       Rts               ;return
+0076                         ;**
+0077                         ;* Load Paper Tape
+0078                         ;* Load Only S1 Type Records 
+0079                         ;* Terminate On S9 Or Checksum Error
+0080                         ;**
+0081 ff29 8d d5              Load  Bsr   Inch        ;read Frame
+0082 ff2b c0 53                    SubB  #'S'
+0083 ff2d 26 fa                    Bne   Load        ;first Char Not (s)
+0084 ff2f 8d cf                    Bsr   Inch        ;read Frame
+0085 ff31 c1 39                    CmpB  #'9'
+0086 ff33 27 1c                    Beq   C1          ;s9 End Of File
+0087 ff35 c1 31                    CmpB  #'1'
+0088 ff37 26 f0                    Bne   Load        ;second Char Not (1)
+0089 ff39 4f                       ClrA           ;zero The Checksum
+0090 ff3a 8d 17                    Bsr   Byte        ;read Byte
+0091 ff3c c0 02                    SubB  #$02
+0092 ff3e d7 f9                    StaB  Bytect   ;byte Count
+0093 ff40 8d 20                    Bsr   Baddr       ;get Address Of Block
+0094 ff42 8d 0f              Load11 Bsr  Byte        ;get Data Byte
+0095 ff44 7a 00 f9                 Dec   Bytect      ;decrement Byte Count
+0096 ff47 27 05                    Beq   Load15      ;done With This Block
+0097 ff49 e7 00                    StaB  0,X         ;store Data
+0098 ff4b 08                       Inx               ;bump Pointer
+0099 ff4c 20 f4                    Bra   Load11      ;go Back For More
+0100 ff4e 4c                 Load15 IncA           ;increment Checksum
+0101 ff4f 27 d8              Lload Beq   Load        ;all Ok - It's Zero
+0102 ff51 20 58              C1    Bra   Crlf        ;checksum Error - Quit
+0103                         ;**
+0104                         ;* Read Byte (2 Hex Digits)
+0105                         ;* Into B Reg
+0106                         ;* A Is Used For Paper Tape Checksum
+0107                         ;**
+0108 ff53 8d ba              Byte  Bsr   Inhex       ;get First Hex Dig
+0109 ff55 58                       AslB              ;get Shift To High Order 4 Bits
+0110 ff56 58                       AslB
+0111 ff57 58                       AslB
+0112 ff58 58                       AslB
+0113 ff59 1b                       Aba               ;add To Cheksum
+0114 ff5a d7 f8                    StaB  Temp     ;store Digit
+0115 ff5c 8d b1                    Bsr   Inhex       ;get 2nd Hex Dig
+0116 ff5e 1b                       Aba               ;add To Checksum
+0117 ff5f db f8                    AddB  Temp     ;combine Digits To Get Byte
+0118 ff61 39                       Rts               ;return
+0119                         ;**
+0120                         ;* Read 16 Bit Address Into X
+0121                         ;* Store Same Address In Xhi & Xlo
+0122                         ;* Clobbers B Reg
+0123                         ;**
+0124 ff62 8d ef              Baddr Bsr   Byte        ;get High Order Address
+0125 ff64 d7 fa                    StaB  Xhi      ;store It
+0126 ff66 8d eb                    Bsr   Byte        ;get Low Order Address
+0127 ff68 d7 fb                    StaB  Xlow     ;store It
+0128 ff6a de fa                    Ldx   Xhi         ;load X With Address Built
+0129 ff6c 39                       Rts               ;return
+0130                         ;**
+0131                         ;* Print Byte In A Reg
+0132                         ;* Clobbers B Reg
+0133                         ;**
+0134 ff6d 16                 Out2h Tab               ;copy Byte To B
+0135 ff6e 54                       LsrB           ;shift To Right
+0136 ff6f 54                       LsrB
+0137 ff70 54                       LsrB
+0138 ff71 54                       LsrB
+0139 ff72 8d 01                    Bsr   Outhr       ;output First Digit
+0140 ff74 16                       Tab               ;byte Into B Again
+0141 ff75 c4 0f              Outhr AndB #$0f     ;get Rid Of Left Dig
+0142 ff77 cb 30                    AddB #$30     ;get Ascii
+0143 ff79 c1 39                    CmpB #$39
+0144 ff7b 23 04                    Bls   Outch
+0145 ff7d cb 07                    AddB #$07     ;if It's A Letter Add 7
+0146 ff7f 01                       Nop               ;line Up Outch Entry Points
+0147 ff80 01                       Nop
+0148 ff81 8c                 Outch Fcb   $8c         ;use Cpx Skip Trick
+0149 ff82 c6 20              Outs  LdaB #$20     ;outs Prints A Space
+0150                         ;**
+0151                         ;* Outch Outputs Character In B
+0152                         ;**
+0153 ff84 37                       PshB              ;save Char
+0154 ff85 8d 9d              Outc1 Bsr   Polcat      ;acia Status To B Reg
+0155 ff87 57                       AsrB
+0156 ff88 24 fb                    Bcc   Outc1       ;xmit Not Ready
+0157 ff8a 33                       PulB              ;char Back To B Reg
+0158 ff8b f7 f0 01                 StaB  Aciada   ;output Character
+0159 ff8e 39                       Rts
+0160                         ;**
+0161                         ;* Examine And Deposit Next
+0162                         ;* Uses Contents Of Xhi & Xlo As Pointer
+0163                         ;**
+0164 ff8f de fa              Nchang Ldx  Xhi         ;increment Pointer
+0165 ff91 08                       Inx
+0166 ff92 df fa                    Stx   Xhi
+0167 ff94 96 fa                    LdaA  Xhi
+0168 ff96 8d d5                    Bsr   Out2h       ;print Out Address
+0169 ff98 96 fb                    LdaA  Xlow
+0170 ff9a 8d d1                    Bsr   Out2h
+0171 ff9c 8c                       Fcb   $8c         ;use Cpx Skip Trick
+0172                         ;**
+0173                         ;* Examine & Deposit
+0174                         ;**
+0175 ff9d 8d c3              Change Bsr  Baddr       ;build Address
+0176 ff9f 8d e1                    Bsr   Outs        ;print Space
+0177 ffa1 a6 00                    LdaA  0,X     ;byte Into A
+0178 ffa3 8d c8                    Bsr   Out2h       ;print Byte
+0179 ffa5 8d db                    Bsr   Outs        ;print Space
+0180 ffa7 8d aa                    Bsr   Byte        ;get New Byte
+0181 ffa9 e7 00                    StaB  0,X     ;store New Byte
+0182                         ;**
+0183                         ;* Command Decoding Section
+0184                         ;**
+0185 ffab 9e f6              Crlf  Lds   Savstk
+0186 ffad c6 0d                    LdaB  #$0d     ;carriage Return
+0187 ffaf 8d d0                    Bsr   Outch
+0188 ffb1 c6 0a                    LdaB  #$0a     ;line Feed
+0189 ffb3 8d cc                    Bsr   Outch
+0190 ffb5 c6 2e                    LdaB  #'.'     ;prompt Character
+0191 ffb7 8d c8                    Bsr   Outch
+0192 ffb9 bd ff 00                 Jsr   Inch        ;read Character
+0193 ffbc 17                       Tba               ;make A Copy
+0194 ffbd 8d c3                    Bsr   Outs        ;print Space
+0195 ffbf 81 4c                    CmpA  #'L'
+0196 ffc1 27 8c                    Beq   Lload       ;load Paper Tape
+0197 ffc3 81 4a                    CmpA  #'J'
+0198 ffc5 26 04                    Bne   Notj
+0199 ffc7 8d 99                    Bsr   Baddr       ;get Address To Jump To
+0200 ffc9 6e 00                    Jmp   0,X        ;jump To It
+0201 ffcb 81 4d              Notj  CmpA  #'M'
+0202 ffcd 27 ce                    Beq   Change      ;examine & Deposit
+0203 ffcf 81 4e                    CmpA  #'N'
+0204 ffd1 27 bc                    Beq   Nchang      ;e & D Next
+0205 ffd3 81 50                    CmpA  #'P'
+0206 ffd5 26 d4                    Bne   Crlf
+0207 ffd7 3b                       Rti               ;procede From Breakpoint
+0208                         ;**
+0209                         ;* Reset Entry Point
+0210                         ;**
+0211 ffd8 8e 00 f3           Reset Lds   #Echo       ;initialize Stack Pointer
+0212 ffdb c6 03                    LdaB  #$03     ;init Echo And Brkadr Flags
+0213 ffdd 37                       PshB
+0214 ffde 37                       PshB
+0215 ffdf f7 f0 00                 StaB  Aciacs   ;master Reset Acia
+0216 ffe2 f6 f0 02                 LdaB  Straps   ;look At Straps
+
+Error:   line:217    Branch out of Range
+      Bmi   Noterm      ;no Term - Jump To 0
+
+0217 ffe5 2b fe                    Bmi   Noterm      ;no Term - Jump To 0
+0218 ffe7 c4 04                    AndB  #$04     ;get # Of Stop Bits
+0219 ffe9 ca d1                    OraB  #$d1
+0220 ffeb f7 f0 00                 StaB  Aciacs   ;init Acia Port
+0221                         ;**
+0222                         ;* Software Interrupt Entry Point
+0223                         ;**
+0224 ffee 9f f6              Intrpt Sts  Savstk      ;save Stack Pointer
+0225 fff0 9f fa                    Sts   Xhi         ;save Sp For N Command
+0226 fff2 d6 f2                    LdaB  Brkadr   ;if Bit 7 Of Brkadr Is Set
+
+Error:   line:227    Branch out of Range
+      Bmi   Noterm      ;jump To 0
+
+0227 fff4 2b fe                    Bmi   Noterm      ;jump To 0
+0228 fff6 20 b3                    Bra   Crlf        ;goto Command Decoder
+0229                         ;**
+0230                         ;* Now Come The Interrupt Vectors
+0231                         ;**
+0232 fff8                          Org   $fff8
+0233 fff8 01 00                    Fdb   Mivec       ;mi Vector
+0234 fffa ff ee                    Fdb   Intrpt      ;swi Vector
+0235 fffc 01 04                    Fdb   Nmivec      ;nmi Vector
+0236 fffe ff d8                    Fdb   Reset       ;reset Vector
+0237                               End
+Aciacs     f000
+Aciada     f001
+Baddr      ff62
+Brkadr     00f2
+Buffer     00ff
+Bufull     00f5
+Byte       ff53
+Bytect     00f9
+C1         ff51
+Change     ff9d
+Crlf       ffab
+Echo       00f3
+Extflg     00f4
+In1hg      ff23
+Inch       ff00
+Inhex      ff0f
+Intrpt     ffee
+Lload      ff4f
+Load       ff29
+Load11     ff42
+Load15     ff4e
+Mivec      0100
+Nchang     ff8f
+Nmivec     0104
+Noterm     0000
+Notj       ffcb
+Out2h      ff6d
+Outc1      ff85
+Outch      ff81
+Outhr      ff75
+Outs       ff82
+Polcat     ff24
+Reset      ffd8
+Savex      00fd
+Savstk     00f6
+Shift      00fc
+Stack      00f1
+Straps     f002
+Temp       00f8
+Xhi        00fa
+Xlow       00fb

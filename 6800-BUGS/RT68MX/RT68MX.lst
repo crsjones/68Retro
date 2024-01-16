@@ -1,0 +1,1052 @@
+output:  RT68MX.s19
+0001                          NAM RT68-V2
+0002                         
+0003                         *        ****************
+0004                         *        *              *
+0005                         *        *  R T / 6 8   *
+0006                         *        *     M X      *
+0007                         *        *              *
+0008                         *        ****************
+0009                         *
+0010                         * RT/68MX REAL TIME OPERATING SYSTEM
+0011                         * (REVISED VERSION OF RT/68MR)
+0012                         *
+0013                         * COPYRIGHT (C) 1976,1977
+0014                         * THE MICROWARE SYSTEMS CORPORATION
+0015                         *
+0016                         * RT/68 LISTING AND OBJECT MAY NOT BE
+0017                         * REPRODUCED IN ANY FORM WITHOUT
+0018                         * EXPRESS WRITTEN PERMISSION.
+0019                         
+0020                         * MEMORY DEFINITIONS
+0021                         
+0022                         * RT/68 EXECUTIVE USES 12 BYTES OF RAM
+0023                         * BEGINNING AT 0, THESE ARE NOT NEEDED
+0024                         * IN SINGLE TASK MODE AND MAY BE
+0025                         * USED FOR ANY OTHER PURPOSE.
+0026 0000                     ORG 0
+0027 0000                    SYSMOD RMB 1 RT MODE 0=USER 1=EXEC
+0028 0001                    CURTSK RMB 1 TASK CURRENTLY ACTIVE
+0029 0002                    TIMREM RMB 1 TASK TIME REMAINING
+0030 0003                    TSKTMR RMB 2 TIMED TASK COUNTER
+0031 0005                    CLOCK RMB 2 RT CLOCK COUNTER
+0032 0007                    INTREQ RMB 1 INTERRUPT REQUEST FLAG
+0033 0008                    TSKTMP RMB 1 RT EXEC TEMP VAL
+0034 0009                    PTYTMP RMB 1 RT EXEC TEMP VAL
+0035 000a                    TIMTSK RMB 1 TIMED TASK INTR STATUS
+0036 000b                    SYSPTY RMB 1 SYS PRIORITY LEVEL
+0037                         
+0038 a000                     ORG $A000
+0039 a000                    IRQTSK RMB 2 IRQ TASK/VECTOR
+0040 a002                    BEGADR RMB 2
+0041 a004                    ENDADR RMB 2
+0042 a006                    NMITSK RMB 2 NMI TASK/VECTOR
+0043 a008                    SPTMP RMB 2 SP TMP VAL
+0044 a00a                    RTMOD RMB 1 RT MODE FLAG
+0045 a00b                    BKPOP RMB 1 BKPT OPCODE/FLAG
+0046 a00c                    BKPADR RMB 2 BKPT ADDRESS
+0047 a00e                    RELFLG RMB 1 SWI FLAG
+0048 a00f                    ERRFLG RMB 1 ERROR FLAG/CODE
+0049 a010                    XTMP RMB 2
+0050 a012                    IOVECT RMB 2 ACIA ADDRESS VECTOR
+0051                         
+0052 a042                     ORG $A042
+0053 a042                    STACK EQU * MONITOR STACK
+0054                         
+0055                         * TASK STATUS TABLE
+0056                         *
+0057                         * CONSISTS OF 16 3-BYTE TASK STATUS WORDS, ONE FOR
+0058                         * EACH POSSIBLE TASK. EACH TASK STATUS WORD CONTAINS
+0059                         * A TASK STATUS BYTE (TSB) AND A 2-BYTE TASK STACK
+0060                         * POINTER (TSP)
+0061                         *
+0062                         * THE TSB IS DEFINED AS FOLLOWS:
+0063                         *
+0064                         *   BIT 7    1=TASK ON  0=TASK OFF
+0065                         *   BIT 6-3  TIME LIMIT IN TICKS (0-15)
+0066                         *   BIT 2-0  TASK PRIORITY (0-7)
+0067                         *
+0068                         * THE TSP IS THE VALUE OF THE TASK'S STACK
+0069                         * POINTER FOLLOWING THE LAST INTERRUPT, AND
+0070                         * THEREFORE POINTS TO THE COMPLETE MPU
+0071                         * REGISTER CONTENTS AT THE TIME THE TASK WAS
+0072                         * INTERRUPTED. TO RESTART A TASK THE EXEC
+0073                         * INITIALIZES THE SP FROM THE TSP AND
+0074                         * EXECUTES AN RTI INSTRUCTION
+0075                         *
+0076 a050                     ORG $A050
+0077 a050                    TSKTBL RMB 48
+0078                         
+0079                         * DEFINE PERIPHERIAL REGISTERS
+0080 8004                     ORG $8004
+0081 8004                    PIADA RMB 1
+0082 8005                    PIACA RMB 1
+0083 8006                    PIADB RMB 1
+0084 8007                    PIACB RMB 1
+0085 8008                    ACIACS RMB 1
+0086 8009                    ACIADB RMB 1
+0087                         
+0088 e000                     ORG $E000
+0089                         * TAPE LOAD SUBROUTINE
+0090                         *
+0091                         * READS MIKBUG(TM) FORMATTED OBJECT TAPES
+0092                         * INTO RAM.
+0093                         *
+0094                         * READER DEVICE IS CONTROLLED BY EITHER ASCII
+0095                         * CONTROL CODES OR PIA READER CONTROL OUTPUT
+0096                         * OUTPUT.
+0097                         *
+0098                         * TWO ERRORS ARE CHECKED: CHECKSUM AND
+0099                         * NO CHANGE
+0100 e000 c6 3c              LOAD LDAB #$3C TAPE ON CONSTANTS
+0101 e002 86 11               LDAA #$11 READER ON CODE
+0102 e004 8d 10               BSR RDRCON LET IT ROLL
+0103 e006 8d 70              LOAD2 BSR INCH
+0104 e008 81 53               CMPA #'S LOOK FOR START OF BLOCK
+0105 e00a 26 fa               BNE LOAD2 BRA IF NOT
+0106 e00c 8d 6a               BSR INCH
+0107 e00e 81 39               CMPA #'9 END OF FILE?
+0108 e010 26 09               BNE LOAD4 BRA IF NOT
+0109 e012 c6 34              LOAD3 LDAB #$34 TAPE OFF CONSTANTS
+0110 e014 86 13               LDAA #$13
+0111 e016 f7 80 07           RDRCON STAB PIACB PIA READER CTRL
+0112 e019 20 5a               BRA OUTCH ASCII TAPE CONTROL
+0113 e01b 81 31              LOAD4 CMPA #'1 S1 DATA RECORD?
+0114 e01d 26 e7               BNE LOAD2 BRA IF NOT, LOOK AGAIN
+0115 e01f 5f                  CLRB ACCB WILL GENERATE CHKSUM
+0116 e020 8d 33               BSR BYTE PICK UP BYTE COUNT
+0117 e022 80 02               SUBA #2 LESS 2 FOR THE BLOCK ADDR
+0118 e024 b7 a0 02           LOAD5 STAA BEGADR SAVE IT
+0119 e027 8d 1e               BSR BADDR GET BLOCK START ADDR IN X
+0120                         
+0121                         * LOOP TO READ DATA BLOCK
+0122 e029 8d 2a              LOAD6 BSR BYTE GET A DATA BYTE
+0123 e02b 7a a0 02            DEC BEGADR DECR BYTE COUNT
+0124 e02e 27 09               BEQ LOAD7 BRA IF LAST BYTE
+0125 e030 a7 00               STAA 0,X PUT IN MEMORY
+0126 e032 a1 00               CMPA 0,X BE SURE IT CHANGED
+0127 e034 26 0a               BNE LDMERR BRA TO ERROR- MUST BE ROM!!
+0128 e036 08                  INX NEXT ADDR
+0129 e037 20 f0               BRA LOAD6 NEXT BYTE
+0130                         
+0131                         * B ADDS CHKSM FROM TAPE TO CALCULATED CHKSUM,
+0132                         * SO BY ADDING ONE IT SHOULD ZERO
+0133 e039 5c                 LOAD7 INCB
+0134 e03a 27 ca               BEQ LOAD2 BRA IF IT DID
+0135 e03c 86 32               LDAA #$32 TOO BAD, GET THE ERROR CODE
+0136 e03e 20 02               BRA LODERR
+0137 e040 86 31              LDMERR LDAA #$31 NO CHANGE ERROR CODE
+0138 e042 b7 a0 0f           LODERR STAA ERRFLG
+0139 e045 20 cb               BRA LOAD3
+0140                         
+0141                         * BUILD 4 HEX CHAR VALUE (ADDRESS)
+0142                         * RETURNS VALUE IN XR
+0143 e047 8d 0c              BADDR BSR BYTE INPUT 2 LEFT CHRS
+0144 e049 b7 a0 04            STAA ENDADR
+0145 e04c 8d 07               BSR BYTE INPUT 2 RIGHT CHRS
+0146 e04e b7 a0 05            STAA ENDADR+1
+0147 e051 fe a0 04            LDX ENDADR
+0148 e054 39                  RTS
+0149                         
+0150                         * INPUT A BYTE (2 HEX CHARS)
+0151                         * RETURNS BINARY VALUE IN ACC A
+0152                         
+0153 e055 37                 BYTE PSHB INPUT 2 HEX CHAR
+0154 e056 8d 52               BSR INHEX LEFT HEX CHAR
+0155 e058 48                  ASLA
+0156 e059 48                  ASLA
+0157 e05a 48                  ASLA
+0158 e05b 48                  ASLA
+0159 e05c 16                  TAB
+0160 e05d 8d 4b               BSR INHEX RIGHT HEX CHAR
+0161 e05f 1b                  ABA
+0162 e060 33                  PULB
+0163 e061 36                  PSHA
+0164 e062 1b                  ABA
+0165 e063 16                  TAB
+0166 e064 32                  PULA
+0167 e065 39                  RTS
+0168 e066 01                  NOP
+0169                         
+0170                         * HEX OUTPUT AUX SUBROUTINES
+0171 e067 44                 OUTHL LSRA
+0172 e068 44                  LSRA
+0173 e069 44                  LSRA
+0174 e06a 44                  LSRA
+0175 e06b 84 0f              OUTHR ANDA #$F
+0176 e06d 8b 30               ADDA #$30
+0177 e06f 81 39               CMPA #$39
+0178 e071 23 02               BLS OUTCH
+0179 e073 8b 07               ADDA #$7
+0180                         
+0181 e075 7e e3 a6           OUTCH JMP OUT1CH
+0182 e078 7e e3 50           INCH JMP IN1CHR
+0183                         
+0184                         * PRINT DATA STRING POINTED TO BY XR
+0185                         * AND ENDING WITH ASCII EOT ($04)
+0186 e07b 8d f8              PDATA2 BSR OUTCH
+0187 e07d 08                  INX
+0188 e07e a6 00              PDATA1 LDAA 0,X SUBR ENTRY POINT
+0189 e080 81 04               CMPA #4
+0190 e082 26 f7               BNE PDATA2
+0191 e084 39                  RTS
+0192                         
+0193                         *
+0194                         * CONSOLE MEMORY DUMP SUBROUTINE
+0195                         *
+0196                         * PRINTS BEG ADDR AND 16 BYTES OF DATA ON EACH LINE
+0197                         * STARTING ADDR IN BEGADR
+0198                         * ENDING ADDR IN ENDADR
+0199                         *
+0200 e085 bd e1 41           DUMP JSR CRLF CR AND LF
+0201 e088 ce a0 02            LDX #BEGADR
+0202 e08b 8d 3b               BSR OUT4HS PRINT BEGINNING ADDR
+0203 e08d c6 10               LDAB #16 BYTE COUNT FOR LINE
+0204 e08f fe a0 02            LDX BEGADR GET BEG ADDR
+0205 e092 8d 36              DUMP1 BSR OUT2HS PRINT A BYTE
+0206 e094 09                  DEX
+0207 e095 bc a0 04            CPX ENDADR DONE YET?
+0208 e098 26 01               BNE DUMP2 BRA IF NOT
+0209 e09a 39                  RTS
+0210 e09b 08                 DUMP2 INX ADV X TO NEXT BYTE
+0211 e09c 5a                  DECB DEC LINE BYTE COUNT
+0212 e09d 26 f3               BNE DUMP1 BRA IF LINE NOT DONE
+0213 e09f ff a0 02            STX BEGADR UPDATE BEGADR TO CURRENT ADDR
+0214 e0a2 20 e1               BRA DUMP
+0215                         
+0216 e0a4 86 33              HBAD LDAA #$33 INHEX ERROR RETURN
+0217 e0a6 b7 a0 0f            STAA ERRFLG
+0218 e0a9 39                  RTS
+0219                         
+0220                         * INPUT HEX CHARACTER, IF CHAR IS NOT
+0221                         * HEX, THE ERROR FLAG IS SET TO THE
+0222                         * ERROR CODE ($33 - ASCII 1)
+0223 e0aa 8d cc              INHEX BSR INCH INPUT ONE HEX CHAR
+0224 e0ac 80 30               SUBA #$30
+0225 e0ae 25 f4               BCS HBAD
+0226 e0b0 81 09               CMPA #9
+0227 e0b2 23 08               BLS IHRET
+0228 e0b4 80 07               SUBA #7
+0229 e0b6 25 ec               BCS HBAD
+0230 e0b8 81 0f               CMPA #15
+0231 e0ba 22 e8               BHI HBAD
+0232 e0bc 39                 IHRET RTS
+0233                         
+0234 e0bd 01                  NOP
+0235 e0be 01                  NOP
+0236                         
+0237                         * OUTPUT BYTE (TWO HEX CHARS) POINTED
+0238                         * TO BY XR
+0239 e0bf a6 00              OUT2H LDAA 0,X
+0240 e0c1 8d a4               BSR OUTHL
+0241 e0c3 a6 00               LDAA 0,X
+0242 e0c5 08                  INX
+0243 e0c6 20 a3               BRA OUTHR
+0244                         
+0245                         * OUTPUT 4 HEX CHARS AND SPACE
+0246 e0c8 8d f5              OUT4HS BSR OUT2H
+0247                         
+0248                         * OUTOUT 2 HEX CHARS AND SPACE
+0249 e0ca 8d f3              OUT2HS BSR OUT2H
+0250                         
+0251                         * OUTPUT A SPACE
+0252 e0cc 86 20              OUTS LDAA #$20
+0253 e0ce 20 a5              BOUT BRA OUTCH
+0254                         
+0255                         * PRINT CONTENTS OF STACK
+0256                         * FORMAT:
+0257                         * SP CC B A XR PC
+0258 e0d0 8d 6f              PRSTAK BSR CRLF PRINT CF+LF
+0259 e0d2 ce a0 08            LDX #SPTMP
+0260 e0d5 8d f1               BSR OUT4HS PRINT SP
+0261 e0d7 fe a0 08            LDX SPTMP
+0262 e0da 08                 PRSTK INX ENTRY TO PRINT TASK STACK
+0263 e0db 8d ed               BSR OUT2HS PRINT CC
+0264 e0dd 8d eb               BSR OUT2HS PRINT ACC B
+0265 e0df 8d e9               BSR OUT2HS PRINT ACC A
+0266 e0e1 20 03               BRA PRSTK2 BRA OVER PATCH
+0267 e0e3 7e e1 6a           CONTRL JMP CONENT PATCH FOR ADDR ALIGNMENT
+0268 e0e6 8d e0              PRSTK2 BSR OUT4HS PRINT XR
+0269 e0e8 20 de               BRA OUT4HS PRINT PC +RTS
+0270                         
+0271                         * WRITE OBJECT TAPE SUBROUTINE
+0272                         *
+0273                         * GENERATES MIKBUG(TM) FORMATTED TAPES
+0274                         * ON SYSTEM TAPE DEVICE (PAPER TAPE,
+0275                         * AUDIO CASSETTE, ETC.)
+0276                         *
+0277                         * BEGINNING ADDRESS OF DATA IN "BEGADR"
+0278                         * ENDING ADDRESS IN "ENDADR"
+0279                         *
+0280                         * ENTRY POINT IS "TAPOUT" - E0EE
+0281                         
+0282                         * AUX. SUBR. TO OUTPUT BYTE + UPDATE
+0283                         * CHECKSUM.
+0284 e0ea eb 00              TAPAUX ADDB 0,X
+0285 e0ec 20 d1               BRA OUT2H
+0286                         
+0287 e0ee 86 12              TAPOUT LDAA #$12 TAPE ON CODE
+0288 e0f0 8d 83               BSR OUTCH
+0289                         *OUTPUT 60 NULL CHARS TO GENERATE
+0290                         * EITHER A 6" LEADER FOR PAPER TAPE
+0291                         * OR A 2 SECOND TAPE SPEEDUP DELAY
+0292                         * (AT 30CPS) FOR AUDIO CASSETTES
+0293 e0f2 c6 3c               LDAB #60 LEADER/DELAY NULL COUNT
+0294 e0f4 4f                 OUTLDR CLRA
+0295 e0f5 8d 12               BSR JOUT1C
+0296 e0f7 5a                  DECB
+0297 e0f8 26 fa               BNE OUTLDR
+0298                         
+0299                         * SUBTRACT BEGADR FROM ENDADR
+0300 e0fa ce a0 02           TOUT1 LDX #BEGADR
+0301 e0fd a6 02               LDAA 2,X
+0302 e0ff e6 03               LDAB 3,X
+0303 e101 e0 01               SUBB 1,X
+0304 e103 a2 00               SBCA 0,X
+0305 e105 24 05               BCC TOUT2 BRA IF BEG < END TO DUMP
+0306 e107 86 14               LDAA #$14 PUNCH OFF CODE
+0307 e109 7e e0 75           JOUT1C JMP OUTCH
+0308                         
+0309                         * CALCULATE BYTE COUNT
+0310 e10c 26 04              TOUT2 BNE TOUT3 BRA IF HIGH BYTE NONZERO
+0311 e10e c1 10               CMPB #16
+0312 e110 25 02               BCS TOUT4 BRA IF BLOCK < 16 BYTES
+0313 e112 c6 0f              TOUT3 LDAB #15 SET FULL BLOCK
+0314 e114 cb 04              TOUT4 ADDB #4 ADD FOR B.C. + BEG ADDR.
+0315                         
+0316                         * OUTPUT BLOCK HEADER
+0317 e116 8d 29               BSR CRLF OUTPUT CR,LF,NULLS
+0318 e118 08                  INX
+0319 e119 8d 29               BSR JPDATA OUTPUT S,1
+0320 e11b 37                  PSHB SAVE BYTE COUNT
+0321 e11c 30                  TSX
+0322 e11d 5f                  CLRB CLEAR CHECKSUM
+0323 e11e 8d ca               BSR TAPAUX PRINT BYTE CNT
+0324 e120 32                  PULA
+0325 e121 80 03               SUBA #3 UPDATE BYTE COUNT
+0326 e123 36                  PSHA
+0327 e124 ce a0 02            LDX #BEGADR
+0328 e127 8d c1               BSR TAPAUX OUTPUT BEG. ADDR
+0329 e129 8d bf               BSR TAPAUX
+0330                         
+0331                         * LOOP TO OUTPUT ONE BLOCK OF DATA
+0332 e12b fe a0 02            LDX BEGADR XR POINTS TO CURRENT DATA BYT
+0333 e12e 8d ba              TOUT5 BSR TAPAUX OUTPUT BYTE
+0334 e130 32                  PULA
+0335 e131 4a                  DECA DECR BYTE COUNT
+0336 e132 36                  PSHA
+0337 e133 26 f9               BNE TOUT5 BRA IF BYTE CNT NOT ZERO
+0338                         
+0339 e135 31                  INS
+0340 e136 ff a0 02            STX BEGADR SAVE CURRENT ADDR
+0341 e139 53                  COMB COMPL CHKSUM
+0342 e13a 37                  PSHB
+0343 e13b 30                  TSX
+0344 e13c 8d ac               BSR TAPAUX OUTPUT CHKSUM
+0345 e13e 31                  INS
+0346 e13f 20 b9               BRA TOUT1
+0347                         
+0348                         * SUBROUTINE TO PRINT CR + LF
+0349 e141 ce e3 d0           CRLF LDX #CRLSTR
+0350 e144 7e e0 7e           JPDATA JMP PDATA1
+0351                         
+0352                         * RT/68 CONSOLE MONITOR PROGRAM
+0353                         *
+0354                         * ACCEPTS COMMANDS FORM THE CONSOLE DEVICE
+0355                         * AND EXECUTES THE APPROPRIATE FUNCTION.
+0356                         
+0357                         * ENTRY POINT FOR RESTART
+0358 e147 8e a0 42           INIT LDS #STACK INITIALIZE PERIPHERALS
+0359 e14a bf a0 08            STS SPTMP
+0360 e14d ce 80 00            LDX #$8000
+0361 e150 ff a0 12            STX IOVECT INIT ACIA VECTOR
+0362                         * INITIALIZE CONTROL PIA
+0363 e153 6c 04               INC 4,X
+0364 e155 c6 16               LDAB #$16
+0365 e157 e7 05               STAB 5,X
+0366 e159 6c 04               INC 4,X
+0367 e15b 86 05               LDAA #$05
+0368 e15d a7 06               STAA 6,X
+0369 e15f 86 34               LDAA #$34
+0370 e161 a7 07               STAA 7,X
+0371                         * INITIALIZE ACIA AT $8000
+0372 e163 86 03               LDAA #3
+0373 e165 a7 00               STAA 0,X
+0374 e167 5a                  DECB
+0375 e168 e7 00               STAB 0,X SET ACIA CSR
+0376 e16a 7f a0 0b           CONENT CLR BKPOP CONSOLE ROUTINE ENTRY POINT
+0377 e16d 7f a0 0a            CLR RTMOD
+0378 e170 7f a0 0f           CONSOL CLR ERRFLG
+0379 e173 8e a0 42            LDS #STACK INIT SP
+0380 e176 8d c9               BSR CRLF
+0381 e178 86 24               LDAA #'$ PRINT PROMPT
+0382 e17a 8d 55               BSR OUTEEE
+0383 e17c 8d 2e               BSR INEEE INPUT COMMAND CODE
+0384                         
+0385                         * COMMAND TABLE LOOKUP/EXECUTE LOOP
+0386                         * SEARCHES FOR COMMAND CODE ON TABLE TO OBTAIN
+0387                         * FUNCTION SUBROUTINE ADDRESS.
+0388 e17e ce e3 d6            LDX #CMDTBL-3 INIT X TO BEGINNING OF TABL
+0389 e181 08                 CMSRCH INX ADV TO NEXT ENTRY
+0390 e182 08                  INX
+0391 e183 08                  INX
+0392 e184 e6 00               LDAB 0,X GET CODE FROM TABLE
+0393 e186 27 0b               BEQ CMDERR IF ZERO, END OF TABLE
+0394 e188 11                  CBA COMMAND CODE MATCH COMPARE
+0395 e189 26 f6               BNE CMSRCH BACK TO ADV IF NOT
+0396 e18b ee 01               LDX 1,X GET CMND SUBR ADDR FROM TABLE
+0397 e18d ad 00               JSR 0,X DO IT
+0398 e18f 8d 57              TSTENT BSR ERTEST TEST FOR ERROR
+0399 e191 20 dd              GOCON BRA CONSOL GET ANOTHER CMND
+0400                         
+0401 e193 c6 36              CMDERR LDAB #'6 ILLEGAL COMMAND CODE
+0402 e195 20 56               BRA ERROR
+0403                         
+0404                         * SUBR TO SET 0R REMOVE BREAKPOINTS
+0405 e197 b6 a0 0b           SETBKP LDAA BKPOP GET BKPT FLAG OR OPCODE
+0406 e19a 27 0a               BEQ SBRET IF = 0, NO BKPT ACTIVE
+0407 e19c fe a0 0c            LDX BKPADR GET ADDR
+0408                         * SWAP FLAG/OPCODE
+0409 e19f e6 00               LDAB 0,X
+0410 e1a1 a7 00               STAA 0,X
+0411 e1a3 f7 a0 0b            STAB BKPOP
+0412 e1a6 39                 SBRET RTS
+0413                         
+0414                         * "D" DUMP COMMAND
+0415 e1a7 8d 2b              DMPCOM BSR GET2AD
+0416 e1a9 7e e0 85            JMP DUMP
+0417                         
+0418 e1ac 7e e3 50           INEEE JMP IN1CHR
+0419                         
+0420                         * SUBR TO PREPARE FOR USER PROGRAM
+0421                         * EXECUTION. CALLED BY G, E, & S COMMANDS
+0422                         *
+0423 e1af 8d e6              SETRUN BSR SETBKP SET BKPT IF ANY
+0424 e1b1 c6 1e               LDAB #$1E
+0425 e1b3 b6 a0 0a            LDAA RTMOD TEST IF MULTITASK MODE
+0426 e1b6 27 04               BEQ SETRN2 BRA IF NOT MULTI
+0427 e1b8 5c                  INCB ENABLE RT CLOCK INTR
+0428 e1b9 4f                  CLRA
+0429 e1ba 97 00               STAA SYSMOD
+0430 e1bc b6 80 04           SETRN2 LDAA PIADA
+0431 e1bf f7 80 05            STAB PIACA
+0432 e1c2 39                 RETURN RTS
+0433                         
+0434                         * "B" BREAKPOINT COMMAND ROUTINE
+0435 e1c3 7f a0 0b           BKPCOM CLR BKPOP
+0436 e1c6 8d 11               BSR GETADR
+0437 e1c8 ff a0 0c            STX BKPADR
+0438 e1cb 86 3f               LDAA #$3F
+0439 e1cd b7 a0 0b            STAA BKPOP
+0440 e1d0 39                  RTS
+0441                         
+0442 e1d1 7e e3 a6           OUTEEE JMP OUT1CH
+0443                         
+0444                         * SUBR TO READ ONE OR TWO ADDRESS
+0445                         * PARAMETERS, COMMA LEADS ADDRESSES,
+0446                         * (CR) CANCELS COMMAND
+0447 e1d4 8d 03              GET2AD BSR GETADR GET TWO ADDRESSES
+0448 e1d6 ff a0 02            STX BEGADR
+0449                         
+0450 e1d9 8d d1              GETADR BSR INEEE GET ONE ADDRESS
+0451 e1db c6 34               LDAB #$34
+0452 e1dd 81 0d               CMPA #$0D
+0453 e1df 27 8f               BEQ CONSOL
+0454 e1e1 81 2c               CMPA #',
+0455 e1e3 26 08               BNE ERROR
+0456 e1e5 bd e0 47            JSR BADDR
+0457                         
+0458                         * ERROR TEST SUBROUTINE
+0459 e1e8 f6 a0 0f           ERTEST LDAB ERRFLG
+0460 e1eb 27 d5               BEQ RETURN
+0461                         
+0462                         * ERROR HANDLER, PRINTS MESSAGE
+0463                         * AND ERROR CODE
+0464 e1ed ce e3 ca           ERROR LDX #ERRMSG
+0465 e1f0 bd e0 7e            JSR PDATA1
+0466 e1f3 17                  TBA
+0467 e1f4 8d db               BSR OUTEEE
+0468 e1f6 20 99               BRA GOCON
+0469                         
+0470                         * "E" EXECUTE SINGLE TASK COMMAND
+0471 e1f8 8d df              EXCOM BSR GETADR
+0472 e1fa 8d b3               BSR SETRUN
+0473 e1fc fe a0 04            LDX ENDADR
+0474 e1ff 6e 00               JMP 0,X
+0475                         
+0476                         * "G" GO TO USER PGM OR RETURN FROM
+0477                         * BREAKPOINT COMMAND ROUTINE
+0478 e201 be a0 08           GOCOM LDS SPTMP
+0479 e204 8d a9               BSR SETRUN
+0480 e206 3b                  RTI
+0481                         
+0482                         * "P" WRITE TAPE COMMAND
+0483 e207 8d cb              PUNCOM BSR GET2AD
+0484 e209 7e e0 ee            JMP TAPOUT
+0485                         
+0486                         * "S" COMMAND
+0487                         * ACTIVATES AND INITIALIZES RT/68
+0488                         * EXECUTIVE
+0489 e20c 7f a0 0e           SYSCOM CLR RELFLG
+0490 e20f 86 01               LDAA #1
+0491 e211 b7 a0 0a            STAA RTMOD
+0492 e214 ce 00 09            LDX #PTYTMP
+0493 e217 6f 00              CLOOP CLR 0,X
+0494 e219 09                  DEX
+0495 e21a 26 fb               BNE CLOOP
+0496 e21c a7 00               STAA 0,X
+0497 e21e 8d 8f               BSR SETRUN
+0498 e220 7e e2 ea            JMP EXEC02 JUMP TO RT EXEC ENTRY
+0499                         
+0500                         * "M" MEMORY EXAMINE/CHANGE ROUTINE
+0501                         * AFTER BEGINNING ADDR IS ENTERED, PGM
+0502                         * PRINTS ADDR AND DATA IN HEX:
+0503                         *    AAAA DD
+0504                         * A SLASH AND NEW HEX DATA CHANGES LOACTION,
+0505                         * A (LF) OPENS NEXT ADDR, AND A (CR) CLOSES
+0506                         * FUNCTION
+0507 e223 8d b4              MEMCOM BSR GETADR GET BEG ADDR
+0508                         
+0509                         * EXAMINE/CHANGE LOOP
+0510 e225 bd e1 41           MEM1 JSR CRLF
+0511 e228 86 0d              MEM2 LDAA #$0D PRINT LF
+0512 e22a 8d a5               BSR OUTEEE
+0513 e22c ce a0 04            LDX #ENDADR
+0514 e22f bd e0 c8            JSR OUT4HS PRINT ADDRESS
+0515 e232 fe a0 04            LDX ENDADR
+0516 e235 bd e0 bf            JSR OUT2H PRINT CONTENTS
+0517 e238 ff a0 04            STX ENDADR
+0518 e23b bd e1 ac            JSR INEEE INPUT DELIMITER
+0519 e23e 81 0a               CMPA #$0A
+0520 e240 27 e6               BEQ MEM2 BRA IF LF TO OPEN NEXT
+0521 e242 81 2f               CMPA #'/
+0522 e244 27 01               BEQ MEM3 BRA IF CHANGE
+0523 e246 39                  RTS
+0524                         
+0525                         * CHANGE MEMORY LOCATION
+0526 e247 bd e0 55           MEM3 JSR BYTE READ NEW DATA
+0527 e24a 8d 9c               BSR ERTEST
+0528 e24c 09                  DEX
+0529 e24d a7 00               STAA 0,X STORE NEW DATA
+0530 e24f a1 00               CMPA 0,X TEST FOR CHANGE
+0531 e251 27 d2               BEQ MEM1 BRA IF OK TO OPEN NEXT
+0532 e253 c6 35               LDAB #$35 ERROR CODE
+0533 e255 20 96               BRA ERROR
+0534                         
+0535                         *       REAL TIME OPERATING SYSTEM COMPONENTS
+0536                         *
+0537                         * CONSISTS OF:
+0538                         *
+0539                         *              INTERRUPT PROCESSORS
+0540                         *              TASK EXECUTIVE
+0541                         *              AUX. SUBROUTINES
+0542                         *
+0543                         
+0544                         
+0545                         * BREAKPOINT SERVICE ROUTINE
+0546 e257 30                 RUNBKP TSX GET SP IN XR
+0547 e258 8d 1d               BSR ADJSTK DECR PC ON STACK
+0548 e25a ee 05               LDX 5,X GET TASK PC OFF STACK
+0549 e25c bc a0 0c            CPX BKPADR COMPARE TO PRESET ADR
+0550 e25f 27 05               BEQ RUNBK2 BRA IF SAME
+0551 e261 c6 37               LDAB #$37 SET ERROR FLAG
+0552 e263 f7 a0 0f            STAB ERRFLG
+0553 e266 bd e1 97           RUNBK2 JSR SETBKP REMOVE BKPT OPCODE
+0554 e269 86 16               LDAA #$16
+0555 e26b b7 80 05            STAA PIACA OFF RT CLOCK + ABORT INTR
+0556 e26e bf a0 08            STS SPTMP SAVE TASK SP
+0557 e271 bd e0 d0            JSR PRSTAK DUMP STACK
+0558 e274 7e e1 8f            JMP TSTENT ENTER CONSOLE MONITOR
+0559                         
+0560                         * SUBR TO DECREMEMT PC ON STACK
+0561 e277 6d 00              ADJSTK TST 0,X
+0562 e279 26 02               BNE ADSTK2
+0563 e27b 6a 05               DEC 5,X
+0564 e27d 6a 06              ADSTK2 DEC 6,X
+0565 e27f 39                  RTS
+0566                         
+0567                         * SWI ENTRY POINT, DETERMINES WHETHER
+0568                         * BREAKPOINT OR PGM RELEASE FUNCTION
+0569                         
+0570 e280                    SINT EQU * SWI VECTOR DESTINATION
+0571 e280 b6 a0 0e            LDAA RELFLG GET PGM RELEASE FLAG
+0572 e283 27 d2               BEQ RUNBKP EXEC BKPT IF NOT SET
+0573 e285 7f a0 0e            CLR RELFLG RESET FLAG
+0574 e288 5f                  CLRB
+0575 e289 20 56               BRA EXEC09 GO TO EXEC TO SWAP
+0576                         
+0577                         * IRQ INTERRUPT ENTRY POINT
+0578                         * INCLUDES LOGIC TO DETECT AND CORRECT
+0579                         * INTERRUPT ERROR OCCURRING WHEN SWI +
+0580                         * NMI OCCUR SIMULTANEOUSLY. (SEE P. A-10
+0581                         * OF M6800 APPLICATIONS MANUAL)
+0582                         
+0583 e28b                    IRQ EQU * IRQ VECTOR DESTINATION
+0584 e28b b6 a0 0e            LDAA RELFLG GET SWI FLAG
+0585 e28e 26 05               BNE INTBAD BRA TO ERR CORR. IF SET
+0586 e290 ce a0 00            LDX #IRQTSK PTR TO IRQ VECTOR/STATUS
+0587 e293 20 36               BRA RUNINT GOTO INTR SERVICE
+0588                         
+0589                         * CORRECT SWI-IRQ COINC. ERROR
+0590 e295 30                 INTBAD TSX
+0591 e296 8d df               BSR ADJSTK DECR TASK PC ON STACK
+0592                         
+0593                         * NMI INTERRUPT HANDLER
+0594                         *
+0595                         * TEST CONTROL PIA FOR ABORT OR CLOCK
+0596                         * INTERRUPT AND PROCESS SAME
+0597                         * IF NOT, EXECUTES USER INTERRUPT
+0598 e298                    NMI EQU * NMI VECTOR DEST.
+0599 e298 b6 80 05            LDAA PIACA GET PIA STATUS REG
+0600 e29b f6 80 04            LDAB PIADA CLEAR PIA INTR FLGS
+0601 e29e 48                  ASLA
+0602 e29f 2b c5               BMI RUNBK2 BRA IF ABORT INTR
+0603 e2a1 24 25               BCC NMI5 BRA IF USER INTR
+0604                         * HERE IF CLOCK INTR ONLY
+0605 e2a3 b6 a0 0a            LDAA RTMOD TEST SYS MOD
+0606 e2a6 27 20               BEQ NMI5 BRA TO USER INTR IF NOT
+0607 e2a8 de 05               LDX CLOCK
+0608 e2aa 08                  INX
+0609 e2ab df 05               STX CLOCK
+0610                         * UPDATE TIMED TASK STATUS
+0611 e2ad de 03               LDX TSKTMR GET THE TIMED TASK COUNTER
+0612 e2af 27 09               BEQ NMI3 BRA IF NOT ACTIVE
+0613 e2b1 09                  DEX DECR THE COUNTER
+0614 e2b2 df 03               STX TSKTMR
+0615 e2b4 26 04               BNE NMI3 BRA IF NOT EXPIRED
+0616 e2b6 96 0a               LDAA TIMTSK GET TIMED TASK STAT BYTE
+0617 e2b8 20 1c               BRA RNINT3 RUN AS INTERRUPT
+0618                         * UPDATE REMAINING TIME OF CURRENT TASK
+0619 e2ba 96 02              NMI3 LDAA TIMREM GET TIME LEFT
+0620 e2bc 27 05               BEQ NMI4 BRA IF UNLIMITED
+0621 e2be 4a                  DECA
+0622 e2bf 97 02               STAA TIMREM
+0623 e2c1 27 1a               BEQ EXEC01 BRA TO EXEC IF TIME UP
+0624 e2c3 96 07              NMI4 LDAA INTREQ TEST FOR PENDING INTR.
+0625 e2c5 26 16               BNE EXEC01
+0626 e2c7 3b                  RTI
+0627 e2c8 ce a0 06           NMI5 LDX #NMITSK GET NMI STAT PTR
+0628                         
+0629                         * GENERAL INTERRUPT PRESERVICE
+0630                         * SELECTS PROPER MODE, AND EITHER
+0631                         * RUNS OR SCHEDULES INTERRUPT SERVICE
+0632                         * TASK ACCORDING TO THE APPROPRIATE
+0633                         * STATUS BYTE
+0634 e2cb b6 a0 0a           RUNINT LDAA RTMOD
+0635 e2ce 26 04               BNE RNINT2 BRA IF MULTITASK MODE
+0636 e2d0 ee 00               LDX 0,X GET VECTOR
+0637 e2d2 6e 00               JMP 0,X EXECUTE SAME AS MIKBUG
+0638                         
+0639 e2d4 a6 00              RNINT2 LDAA 0,X GET INTR STATUS BYTE
+0640 e2d6 8d 54              RNINT3 BSR TSKON TURN SERV. TASK ON
+0641 e2d8 4d                  TSTA CHK IMMED OR DEFERRED
+0642 e2d9 2a 50               BPL INTRET BRA IF DEFERRED
+0643 e2db 97 07               STAA INTREQ SET INTR REQ. FLAG
+0644                         * FALL THRU TO EXECUTIVE
+0645                         
+0646                         * RT/68 MULTI TASK EXECUTIVE PROGRAM
+0647                         *
+0648                         * SAVES CURRENT TASK STATUS IN TASK STATUS
+0649                         * TABLE, THEN SEARCHES THE TABLE FOR THE
+0650                         * HIGHEST PRIORITY RUNNABLE TASK AND STARTS
+0651                         * IT. IF THERE IS MORE THAN ONE RUNNABLE TASK
+0652                         * AT THE HIGHEST LEVEL, THE
+0653                         * EXECUTIVE WII RUN THEM ROUND ROBIN
+0654                         
+0655                         * TEST MODE TO PREVENT MULTIPLE
+0656                         * EXECUTION OF EXEC BY INTERRUPTS
+0657 e2dd d6 00              EXEC01 LDAB SYSMOD
+0658 e2df 26 4a               BNE INTRET BRA IF EXEC ALREADY ACTIVE
+0659 e2e1 5c                 EXEC09 INCB SET EXEC MODE
+0660 e2e2 d7 00               STAB SYSMOD
+0661                         * SAVE CURRENT TASK SP ON TABLE
+0662 e2e4 96 01               LDAA CURTSK GET CURRENT TASK #
+0663 e2e6 8d 53               BSR FNDTSB FIND ADDR OF TSB
+0664 e2e8 af 01               STS 1,X SAVE SP
+0665                         
+0666                         * INITIALIZE EXEC TEMP VALUES
+0667                         * PTYTMP = HIGHEST PRIORITY FOUND
+0668                         * TSKTMP = TASK # FOR ABOVE
+0669 e2ea 4f                 EXEC02 CLRA
+0670 e2eb 97 07               STAA INTREQ
+0671 e2ed 97 09               STAA PTYTMP
+0672 e2ef 97 08               STAA TSKTMP
+0673 e2f1 96 01               LDAA CURTSK
+0674                         
+0675                         * LOOP TO SEARCH THRU TABLE FOR
+0676                         * HIGHEST RUNNABLE TASK
+0677                         * STARTS WITH CURRENT TASK AND COUNTS
+0678                         * DOWN SO LAST TASK TESTED IS THE
+0679                         * CURRENT TASK # -1. THIS ALLOWS TASKS
+0680                         * AT THE SAME PRIORITY LEVEL TO EXECUTE
+0681                         * ROUND-ROBIN.
+0682 e2f3 8d 46              EXEC03 BSR FNDTSB FIND TSB
+0683 e2f5 2a 0d               BPL EXEC04 BRA IF TASK OFF
+0684 e2f7 c4 07               ANDB #$07 MASK PRIORITY
+0685 e2f9 d1 09               CMPB PTYTMP COMP. TO HIGHEST SO FAR
+0686 e2fb 25 07               BCS EXEC04 BRA IF LOWER
+0687 e2fd d7 09               STAB PTYTMP MAKE IT LATEST
+0688 e2ff 16                  TAB CHANGE SET TASK #
+0689 e300 ca 80               ORAB #$80 SET FOUND FLAG
+0690 e302 d7 08               STAB TSKTMP
+0691                         *ADVANCE TO NEXT TASK
+0692 e304 4a                 EXEC04 DECA
+0693 e305 84 0f               ANDA #$0F
+0694 e307 91 01               CMPA CURTSK SEE IF LAST TASK
+0695 e309 26 e8               BNE EXEC03 BRA IF NOT FINISHED
+0696                         
+0697                         * CHECK IF TASK FOUND IS RUNNABLE
+0698 e30b d6 09               LDAB PTYTMP GET HI PRIORITY
+0699 e30d d1 0b               CMPB SYSPTY COMPARE TO SYS PRIORITY
+0700 e30f 25 d9               BCS EXEC02 SEARCH AGAIN IF LOWER
+0701 e311 96 08               LDAA TSKTMP TEST FOUND FLAG
+0702 e313 2a d5               BPL EXEC02 BRA IF NOT SET
+0703                         
+0704                         * RUNNABLE TASK FOUND, SET SYSTEM
+0705                         * PARAMETERS TO RUN IT
+0706 e315 84 0f               ANDA #$0F
+0707 e317 97 01               STAA CURTSK SET TASK #
+0708 e319 8d 20               BSR FNDTSB GET TASK TSB
+0709 e31b 54                  LSRB EXTRACT TIME LIMIT
+0710 e31c 54                  LSRB
+0711 e31d 54                  LSRB
+0712 e31e c4 0f               ANDB #$0F
+0713 e320 d7 02               STAB TIMREM
+0714 e322 ae 01               LDS 1,X LOAD TASK SP
+0715                         * TEST FOR ANY INTERRUPT THAT OCCURRED
+0716                         * DURING EXEC MODE
+0717 e324 96 07               LDAA INTREQ
+0718 e326 26 c2               BNE EXEC02
+0719 e328 7f 00 00            CLR SYSMOD SET USER MODE
+0720 e32b 3b                 INTRET RTI RUN TASK
+0721                         
+0722                         * RT EXECUTIVE AUX. SUBROUTINES
+0723                         *
+0724                         * ALL ARE REENTRANT SUBROUTINES THAT
+0725                         * PASS PARAMETERS AS FOLLOWS:
+0726                         *
+0727                         * ENTRY: TASK # IN ACC A
+0728                         *
+0729                         * RETURN: TASK # IN ACC A
+0730                         *         TASK STATUS BYTE (NEW) IN ACC B
+0731                         *         ADDR OF TSB IN XR
+0732                         
+0733                         * SUBR TO TURN TASK ON
+0734 e32c 8d 0d              TSKON BSR FNDTSB
+0735 e32e ca 80               ORAB #$80
+0736 e330 e7 00              RESTSB STAB 0,X
+0737 e332 39                  RTS
+0738                         
+0739                         * SUBR TO TURN CURRENT TASK OFF
+0740 e333 96 01              CTSKOF LDAA CURTSK
+0741                         
+0742                         * SUBR TO TURN TASK OFF
+0743 e335 8d 04              TSKOFF BSR FNDTSB
+0744 e337 c4 7f               ANDB #$7F
+0745 e339 20 f5               BRA RESTSB
+0746                         
+0747                         * SUBR TO FIND TASK STATUS BYTE/WORD
+0748 e33b 36                 FNDTSB PSHA
+0749 e33c 84 0f               ANDA #$0F
+0750 e33e 16                  TAB
+0751 e33f 48                  ASLA
+0752 e340 1b                  ABA
+0753 e341 8b 50               ADDA #$50
+0754 e343 36                  PSHA
+0755 e344 86 a0               LDAA #$A0
+0756 e346 36                  PSHA
+0757 e347 30                  TSX
+0758 e348 a6 00               LDAA 0,X
+0759 e34a 31                  INS
+0760 e34b 31                  INS
+0761 e34c e6 00               LDAB 0,X
+0762 e34e 32                  PULA
+0763 e34f 39                  RTS
+0764                         
+0765                         * CHARACTER AND BYTE I/O ROUTINES
+0766                         *
+0767                         * SELECTS INTERFACE TYPE (PIA OR ACIA)
+0768                         * ACCORDING TO THE LEVEL OF PIA INPUT CB5
+0769                         * IF ACIA TYPE IS SELECTED, THE ADDRESS
+0770                         * OF THE ACIA IS OBTAINED FROM "IOVECT"
+0771                         * WHICH WILL DEFAULT TO $8000
+0772                         
+0773                         * READ CHAR WITHOUT PARITY OR RUBOUT
+0774 e350 8d 07              IN1CHR BSR INBYTE GET BYTE
+0775 e352 84 7f               ANDA #$7F STRIP PARITY BIT
+0776 e354 81 7f               CMPA #$7F TEST FOR RUBOUT
+0777 e356 27 f8               BEQ IN1CHR AGAIN IF RUBOUT
+0778 e358 39                  RTS
+0779                         
+0780                         * READ 8-BIT BYTE
+0781 e359 37                 INBYTE PSHB
+0782 e35a 8d 31               BSR IOAUX SAVE XR + SAMPLE TYPE
+0783 e35c 26 26               BNE ACIAIN
+0784                         
+0785                         * PIA SOFTWARE UART ROUTINE -
+0786                         * INPUT ONE CHAR WITHOUT PARITY
+0787 e35e a6 04              PIAIN LDAA 4,X
+0788 e360 2b fc               BMI PIAIN WAIT FOR START BIT
+0789 e362 6f 06               CLR 6,X SET 1/2 BIT TIME
+0790 e364 8d 3b               BSR STRTBT RESET TIMER
+0791 e366 8d 35               BSR WAITBT WAIT FOR TIMER
+0792 e368 c6 04               LDAB #$04
+0793 e36a e7 06               STAB 6,X SET TIMER TO FULL BIT TIME
+0794 e36c 58                  ASLB BIT COUNT=8
+0795                         * LOOP TO INPUT 8 DATA BITS
+0796 e36d 8d 2e              PIAIN2 BSR WAITBT WAIT BIT TIME
+0797 e36f 0d                  SEC
+0798 e370 69 04               ROL 4,X SHIFT OUT DATA
+0799 e372 46                  RORA SHIFT IN A TO BUILD
+0800 e373 5a                  DECB DECR BIT COUNT
+0801 e374 26 f7               BNE PIAIN2 BRA IF NOT DONE
+0802 e376 8d 25               BSR WAITBT WAIT FOR STOP BIT
+0803 e378 e6 06              CHKSTB LDAB 6,X TEST FOR # STOP BITS
+0804 e37a 58                  ASLB
+0805 e37b 2a 02               BPL RESTOR
+0806 e37d 8d 1e               BSR WAITBT
+0807                         * RESTORE REGISTERS + RETURN
+0808 e37f fe a0 10           RESTOR LDX XTMP
+0809 e382 33                  PULB
+0810 e383 39                  RTS
+0811                         
+0812                         * ACIA CHAR INPUT ROUTINE
+0813 e384 e6 00              ACIAIN LDAB 0,X GET STAT REG
+0814 e386 54                  LSRB MOVE RDY BIT TO SIGN POS
+0815 e387 24 fb               BCC ACIAIN WAIT IF NOT READY
+0816 e389 a6 01               LDAA 1,X READ DATA
+0817 e38b 20 f2               BRA RESTOR BRA TO CLEANUP
+0818                         
+0819                         * I/O SETUP SUBROUTINE
+0820 e38d ff a0 10           IOAUX STX XTMP SAVE XR
+0821 e390 ce 80 00            LDX #$8000 LOAD XR WITH PERIPH PTR
+0822 e393 e6 06               LDAB 6,X TEST FOR ACIA OR PIA
+0823 e395 c5 20               BITB #$20
+0824 e397 27 03               BEQ AUXRET BRA IF PIA
+0825 e399 fe a0 12            LDX IOVECT GET ACIA ADDRESS
+0826 e39c 39                 AUXRET RTS
+0827                         
+0828                         * SUBR TO WAIT FOR 1 BIT TIME
+0829                         * AND RESET TIMER
+0830 e39d 6d 06              WAITBT TST 6,X
+0831 e39f 2a fc               BPL WAITBT
+0832                         
+0833                         * SUBROUTINE TO START (RESET) BIT TIMER
+0834 e3a1 6c 06              STRTBT INC 6,X
+0835 e3a3 6a 06               DEC 6,X
+0836 e3a5 39                  RTS
+0837                         * OUTPUT 1 CHARACTER SUBROUTINE TO
+0838                         * PIA OR ACIA
+0839 e3a6 37                 OUT1CH PSHB SAVE ACC B
+0840 e3a7 8d e4               BSR IOAUX SETUP FOR ROUTINE
+0841 e3a9 26 15               BNE ACOUT USE ACIA SUBR IF TRUE
+0842                         
+0843                         * PIA SOFTWARE UART CHAR OUTPUT
+0844 e3ab c6 04               LDAB #4
+0845 e3ad e7 04               STAB 4,X SPACE FOR START BIT
+0846 e3af e7 06               STAB 6,X SET TIMER FOR FULL
+0847 e3b1 c6 0a               LDAB #10 INIT. BIT COUNTER
+0848 e3b3 8d ec               BSR STRTBT RESET TIMER
+0849                         * BIT OUTPUT LOOP
+0850 e3b5 8d e6              POUT1 BSR WAITBT WAIT BIT TIME
+0851 e3b7 a7 04               STAA 4,X SET BIT OUTPUT
+0852 e3b9 0d                  SEC
+0853 e3ba 46                  RORA SHIFT IN NEXT BIT
+0854 e3bb 5a                  DECB DEC BYTE COUNT
+0855 e3bc 26 f7               BNE POUT1 BRA IF NOT LAST BIT
+0856 e3be 20 b8               BRA CHKSTB
+0857                         
+0858                         * ACIA CHAR OUTPUT ROUTINE
+0859 e3c0 e6 00              ACOUT LDAB 0,X GET STAT REG
+0860 e3c2 54                  LSRB SHIFT RDY BIT TO C
+0861 e3c3 54                  LSRB
+0862 e3c4 24 fa               BCC ACOUT BRA IF NOT READY
+0863 e3c6 a7 01               STAA 1,X STORE DATA
+0864 e3c8 20 b5               BRA RESTOR GO CLEANUP
+0865                         
+0866                         * ERROR MESSAGE STRING
+0867 e3ca 20 45 52 52 20 04  ERRMSG FCB $20,'E,'R,'R,$20,4
+0868                         
+0869                         * CR/LF AND TAPE HEADER STRING
+0870 e3d0 0d 0a 00 00 00 04  CRLSTR FCB $0D,$0A,0,0,0,4,'S,'1,4
+     53 31 04
+0871                         
+0872                         *
+0873                         * COMMAND CODE/ADDRESS TABLE
+0874                         *
+0875 e3d9                    CMDTBL EQU *
+0876 e3d9 42                  FCB 'B
+0877 e3da e1 c3               FDB BKPCOM
+0878 e3dc 44                  FCB 'D
+0879 e3dd e1 a7               FDB DMPCOM
+0880 e3df 45                  FCB 'E
+0881 e3e0 e1 f8               FDB EXCOM
+0882 e3e2 47                  FCB 'G
+0883 e3e3 e2 01               FDB GOCOM
+0884 e3e5 4c                  FCB 'L
+0885 e3e6 e0 00               FDB LOAD
+0886 e3e8 4d                  FCB 'M
+0887 e3e9 e2 23               FDB MEMCOM
+0888 e3eb 50                  FCB 'P
+0889 e3ec e2 07               FDB PUNCOM
+0890 e3ee 52                  FCB 'R
+0891 e3ef e0 d0               FDB PRSTAK
+0892 e3f1 53                  FCB 'S
+0893 e3f2 e2 0c               FDB SYSCOM
+0894 e3f4 1b                  FCB $1B (ESC) NEXT ROM OR USER DEFINE
+0895 e3f5 70 00               FDB $7000
+0896 e3f7 00                  FCB 0 END
+0897                         
+0898                         * INTERRUPT VECTORS
+0899                         *
+0900 e3f8 e2 8b               FDB IRQ IRQ VECTOR
+0901 e3fa e2 80               FDB SINT SWI VECTOR
+0902 e3fc e2 98               FDB NMI NMI VECTOR
+0903 e3fe e1 47               FDB INIT RESTART VECTOR
+0904                         
+0905                          END
+ACIACS     8008
+ACIADB     8009
+ACIAIN     e384
+ACOUT      e3c0
+ADJSTK     e277
+ADSTK2     e27d
+AUXRET     e39c
+BADDR      e047
+BEGADR     a002
+BKPADR     a00c
+BKPCOM     e1c3
+BKPOP      a00b
+BOUT       e0ce
+BYTE       e055
+CHKSTB     e378
+CLOCK      0005
+CLOOP      e217
+CMDERR     e193
+CMDTBL     e3d9
+CMSRCH     e181
+CONENT     e16a
+CONSOL     e170
+CONTRL     e0e3
+CRLF       e141
+CRLSTR     e3d0
+CTSKOF     e333
+CURTSK     0001
+DMPCOM     e1a7
+DUMP       e085
+DUMP1      e092
+DUMP2      e09b
+ENDADR     a004
+ERRFLG     a00f
+ERRMSG     e3ca
+ERROR      e1ed
+ERTEST     e1e8
+EXCOM      e1f8
+EXEC01     e2dd
+EXEC02     e2ea
+EXEC03     e2f3
+EXEC04     e304
+EXEC09     e2e1
+FNDTSB     e33b
+GET2AD     e1d4
+GETADR     e1d9
+GOCOM      e201
+GOCON      e191
+HBAD       e0a4
+IHRET      e0bc
+IN1CHR     e350
+INBYTE     e359
+INCH       e078
+INEEE      e1ac
+INHEX      e0aa
+INIT       e147
+INTBAD     e295
+INTREQ     0007
+INTRET     e32b
+IOAUX      e38d
+IOVECT     a012
+IRQ        e28b
+IRQTSK     a000
+JOUT1C     e109
+JPDATA     e144
+LDMERR     e040
+LOAD       e000
+LOAD2      e006
+LOAD3      e012
+LOAD4      e01b
+LOAD5      e024
+LOAD6      e029
+LOAD7      e039
+LODERR     e042
+MEM1       e225
+MEM2       e228
+MEM3       e247
+MEMCOM     e223
+NMI        e298
+NMI3       e2ba
+NMI4       e2c3
+NMI5       e2c8
+NMITSK     a006
+OUT1CH     e3a6
+OUT2H      e0bf
+OUT2HS     e0ca
+OUT4HS     e0c8
+OUTCH      e075
+OUTEEE     e1d1
+OUTHL      e067
+OUTHR      e06b
+OUTLDR     e0f4
+OUTS       e0cc
+PDATA1     e07e
+PDATA2     e07b
+PIACA      8005
+PIACB      8007
+PIADA      8004
+PIADB      8006
+PIAIN      e35e
+PIAIN2     e36d
+POUT1      e3b5
+PRSTAK     e0d0
+PRSTK      e0da
+PRSTK2     e0e6
+PTYTMP     0009
+PUNCOM     e207
+RDRCON     e016
+RELFLG     a00e
+RESTOR     e37f
+RESTSB     e330
+RETURN     e1c2
+RNINT2     e2d4
+RNINT3     e2d6
+RTMOD      a00a
+RUNBK2     e266
+RUNBKP     e257
+RUNINT     e2cb
+SBRET      e1a6
+SETBKP     e197
+SETRN2     e1bc
+SETRUN     e1af
+SINT       e280
+SPTMP      a008
+STACK      a042
+STRTBT     e3a1
+SYSCOM     e20c
+SYSMOD     0000
+SYSPTY     000b
+TAPAUX     e0ea
+TAPOUT     e0ee
+TIMREM     0002
+TIMTSK     000a
+TOUT1      e0fa
+TOUT2      e10c
+TOUT3      e112
+TOUT4      e114
+TOUT5      e12e
+TSKOFF     e335
+TSKON      e32c
+TSKTBL     a050
+TSKTMP     0008
+TSKTMR     0003
+TSTENT     e18f
+WAITBT     e39d
+XTMP       a010

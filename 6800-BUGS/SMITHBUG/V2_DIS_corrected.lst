@@ -1,0 +1,1460 @@
+output:  V2_DIS_corrected.s19
+0001                         ;	title "MIKES-M6802 OPERATING SYSTEM"
+0002                         ;	REV 2.0
+0003                         ;
+0004                         ; This is the latest SMITHBUG+S1 source 
+0005                         ; with the Disassembler "PSH A = MISSING A" bug removed 
+0006                         ; [see TBLKUP routine, # sign did not replace  £ ].
+0007                         ; I emailed Ed Smith but as yet no reply. - Mike Lee, April 24 2019
+0008                         ;
+0009                         ; July 30 2019 HRJ 
+0010                         ; - corrected TBLKUP routine as above, adds 4 bytes to code
+0011                         ; -  CMPX	VAR non- instruction commented out near GETCOUNT in S-record routine
+0012                         ; -  SLOAD routine starts NINE bytes from previous code, TBLKUP only accounts for four                       
+0013                         ; -- difference of 5 occurs apparently in counting bytes in S1STRING
+0014                         ;
+0015                         ;	M	MOVE MEMORY
+0016                         ;	E	CHANGE MEMORY
+0017                         ;	G	GO TO PROGRAM
+0018                         ;	R	PRINT
+0019                         ;	T	TRACE PROGRAM
+0020                         ;	@	ASCII CONVERSION
+0021                         ;	H	PRINTER ON
+0022                         ;	V	VIEW MEMORY
+0023                         ;	I	FILL MEMORY
+0024                         ;	J	JUMP TO TARGET PROGRAM
+0025                         ;	F	FIND 
+0026                         ;	Q	HARDWARE LOCATION
+0027                         ;	D	DISASSEMBLE CODE
+0028                         ;	K	CONTINUE AFTER BREAK
+0029                         ;	1	BREAKPOINT ONE
+0030                         ;	2	BREAKPOINT TWO
+0031                         ;	&	S1 LOAD PROGRAMME
+0032                         ;	*	HARDWARE LOCATION (TBA)
+0033                         ;	O	ECHO ON
+0034                         ;	N	ECHO OFF
+0035                         ;
+0036                         ;
+0037                         ;	ADDRESS
+0038                         ;
+0039 7f00                    VAR	EQU	$7F00		; TOP OF USER MEMORY
+0040                         ;
+0041 7f00                    		ORG VAR	;V1 has ORG at $A000H
+0042                         ;
+0043 7f00                    BUFFER	RMB 2		;V2: Buffer to protect system scratch
+0044 7f02                    IOV		RMB 2		;here and below same as V1
+0045 7f04                    BEGA	RMB 2
+0046 7f06                    ENDA	RMB 2
+0047 7f08                    NIO		RMB 2
+0048 7f0a                    SP		RMB 2
+0049 7f0c                    ACIAT	RMB 1
+0050 7f0d                    ECHO	RMB 1
+0051 7f0e                    XHI		RMB 1
+0052 7f0f                    XLOW	RMB 1
+0053 7f10                    TEMP	RMB 1
+0054 7f11                    TW		RMB 2
+0055 7f13                    TFLAG	RMB 1
+0056 7f14                    XTEMP	RMB 2
+0057 7f16                    BKFLG	RMB 1
+0058 7f17                    SWIPTR	RMB 45
+0059 7f44                    STACK	RMB 8
+0060 7f4c                    PRINTR	RMB 3
+0061 7f4f                    BFLAG 	RMB 1
+0062 7f50                    MFLAG	RMB 1
+0063 7f51                    XFLAG	RMB 1
+0064 7f52                    BITE2	RMB 1
+0065 7f53                    BITE3	RMB 15
+0066 7f62                    TSTACK	RMB 1
+0067 7f63                    OPSAVE	RMB 1
+0068 7f64                    PB1		RMB 1
+0069 7f65                    PB2		RMB 1
+0070 7f66                    PB3		RMB 1
+0071 7f67                    BYTECT	RMB 1
+0072 7f68                    PC1		RMB 1
+0073 7f69                    PC2		RMB 1
+0074 7f6a                    BPOINT	RMB 3
+0075 7f6d                    BKFLG2	RMB 1
+0076 7f6e                    MCONT	RMB 1
+0077                         ; V2 S-record data area
+0078 7f6f                    TEMPX1	RMB 2			; S-Load Temporary X register
+0079 7f71                    ADDRESS	RMB 1			; Build 16 bit address byte 1
+0080 7f72                    ADDRESS1	RMB 1			; Build 16 bit address byte 2
+0081 7f73                    BYTESTORE	RMB 1			; Save Byte Count
+0082 7f74                    TEMPA		RMB 1			; Save A Register
+0083                         ;
+0084 8018                    ACIACS	EQU	$8018		;V1 has $8000, $8001
+0085 8019                    ACIADA	EQU	$8019
+0086                         ;
+0087 8000                    PIAD1A	EQU	$8000		;V2 has PIA support
+0088 8001                    PIAS1A	EQU	$8001
+0089 8002                    PIAD1B	EQU	$8002
+0090 8003                    PIAS1B	EQU	$8003
+0091                         ;
+0092 8008                    PIAD2A	EQU	$8008
+0093 8009                    PIAS2A	EQU	$8009
+0094 800a                    PIAD2B	EQU	$800A
+0095 800b                    PIAS2B	EQU	$800B
+0096                         ;
+0097                         ;	OPT	MEMORY
+0098                         ;
+0099 c000                    	ORG	$C000			;V1 has $F800H
+0100                         ;
+0101                         ;	ENTER POWER ON SEQUENCE
+0102                         ;
+0103 c000                    START EQU *
+0104 c000 8e 7f 44           	LDS #STACK
+0105 c003 bf 7f 0a           	STS SP
+0106 c006 7f 7f 0d           	CLR ECHO
+0107 c009 ce c1 25           	LDX #SFE
+0108 c00c ff 7f 17           	STX SWIPTR
+0109 c00f ff 7f 08           	STX NIO
+0110                         ;
+0111                         ;	ACIA INITIALISE
+0112                         ;
+0113 c012 86 03              	LDAA	#$03	;RESET CODE
+0114 c014 b7 80 18           	STAA	ACIACS
+0115 c017 01                 	NOP
+0116 c018 01                 	NOP
+0117 c019 01                 	NOP
+0118 c01a 86 15              	LDAA	#$15	;CR10:/16, 8N1 NON-INTERRUPT
+0119 c01c b7 7f 0c           	STAA	ACIAT
+0120                         ;
+0121                         ;	COMMAND CONTROL
+0122                         ;
+0123 c01f b6 7f 0c           CONTRL LDAA ACIAT
+0124 c022 b7 80 18           	STAA ACIACS
+0125 c025 8e 7f 44           	LDS #STACK	;SET CONTRL STACK POINTER
+0126 c028 8e 7f 62           	LDS #TSTACK
+0127 c02b 7f 7f 13           	CLR TFLAG
+0128 c02e 7f 7f 16           	CLR BKFLG
+0129 c031 7f 7f 6d           	CLR BKFLG2
+0130 c034 ce c7 6b           	LDX #MCL
+0131 c037 8d 61              	BSR PDATA1
+0132 c039 8d 59              	BSR INCH
+0133 c03b 16                 	TAB
+0134 c03c bd c0 ef           	JSR OUTS
+0135                         ;
+0136                         ; CHECK IF COMMAND IS VALID AND JUMP TO APPLICATION
+0137                         ;
+0138 c03f ce c7 c0           	LDX #FUTABL
+0139 c042 e1 00              NXTCHR CMPB 0,X
+0140 c044 27 0b              	BEQ GOODCH
+0141 c046 08                 	INX
+0142 c047 08                 	INX
+0143 c048 08                 	INX
+0144 c049 8c c7 fc           	CPX #TBLEND
+0145 c04c 26 f4              	BNE NXTCHR
+0146 c04e 7e c4 41           	JMP CKCBA
+0147 c051 ee 01              GOODCH	LDX 1,X
+0148 c053 6e 00              	JMP 0,X       ;JUMP TO COMMAND
+0149                         ;
+0150                         ;  IRQ INTERUPT SEQUENCE
+0151                         ;
+0152 c055 fe 7f 02           IO	LDX IOV
+0153 c058 6e 00              	JMP 0,X
+0154                         ;
+0155                         ;  NMI SEQUENCE
+0156                         ;
+0157 c05a fe 7f 08           POWDWN LDX NIO
+0158 c05d 6e 00              	JMP 0,X
+0159                         ;
+0160                         ;  SWI SEQUENCE
+0161                         ;
+0162 c05f fe 7f 17           SWI	LDX SWIPTR
+0163 c062 6e 00              	JMP 0,X
+0164 c064 86 3f              LOAD19 LDAA #$3F
+0165 c066 8d 29              	BSR OUTCH
+0166 c068 20 b5              C1	BRA CONTRL
+0167                         ;
+0168                         ;  BUILD ADDRESS
+0169                         ;
+0170 c06a 8d 0c              BADDR	BSR BYTE
+0171 c06c b7 7f 0e           	STAA XHI
+0172 c06f 8d 07              	BSR BYTE
+0173 c071 b7 7f 0f           	STAA XLOW
+0174 c074 fe 7f 0e           	LDX XHI
+0175 c077 39                 	RTS
+0176                         ;
+0177                         ;  INPUT ONE BYTE
+0178                         ;
+0179 c078 8d 53              BYTE	BSR INHEX
+0180 c07a 48                 	ASLA
+0181 c07b 48                 	ASLA
+0182 c07c 48                 	ASLA
+0183 c07d 48                 	ASLA
+0184 c07e 16                 	TAB
+0185 c07f 8d 4c              	BSR INHEX
+0186 c081 1b                 	ABA
+0187 c082 39                 	RTS
+0188                         ;
+0189                         ;  OUTPUT LEFT HEX NUMBER
+0190                         ;
+0191 c083 44                 OUTHL	LSRA
+0192 c084 44                 	LSRA
+0193 c085 44                 	LSRA
+0194 c086 44                 	LSRA
+0195                         ;
+0196                         ;  OUTPUT RIGHT HEX NUMBER
+0197                         ;
+0198 c087 84 0f              OUTHR	ANDA #$F
+0199 c089 8b 30              	ADDA #$30
+0200 c08b 81 39              	CMPA #$39
+0201 c08d 23 02              	BLS OUTCH
+0202 c08f 8b 07              	ADDA #$7
+0203 c091 7e c2 0a           OUTCH	JMP OUTEEE
+0204 c094 7e c1 f3           INCH	JMP INEEE
+0205                         ;
+0206 c097 8d f8              PDATA2	BSR OUTCH
+0207 c099 08                 	INX
+0208 c09a a6 00              PDATA1	LDAA 0,X
+0209 c09c 81 04              	CMPA #$4
+0210 c09e 26 f7              	BNE PDATA2
+0211 c0a0 39                 	RTS
+0212                         ;
+0213                         ; CHANGE MEMORY
+0214                         ;
+0215 c0a1 8d c7              CHANGE	BSR BADDR
+0216 c0a3 ce c7 6b           CHA51	LDX #MCL
+0217 c0a6 8d f2              	BSR PDATA1
+0218 c0a8 8d 72              	BSR OUTXHI
+0219 c0aa 8d 41              	BSR OUT2HS
+0220 c0ac ff 7f 0e           	STX XHI
+0221 c0af 8d e3              	BSR INCH
+0222 c0b1 81 20              	CMPA #$20
+0223 c0b3 27 ee              	BEQ CHA51
+0224 c0b5 81 5e              	CMPA #$5E
+0225 c0b7 26 07              	BNE CHM1
+0226 c0b9 09                 	DEX
+0227 c0ba 09                 	DEX
+0228 c0bb ff 7f 0e           	STX XHI
+0229 c0be 20 e3              	BRA CHA51
+0230 c0c0 8d 0d              CHM1	BSR INHEX+2
+0231 c0c2 8d b6              	BSR BYTE+2
+0232 c0c4 09                 	DEX
+0233 c0c5 a7 00              	STAA 0,X
+0234 c0c7 a1 00              	CMPA 0,X
+0235 c0c9 27 d8              	BEQ CHA51
+0236                         ;
+0237 c0cb 20 97              XBK	BRA LOAD19
+0238                         ;
+0239 c0cd 8d c5              INHEX	BSR INCH
+0240 c0cf 80 30              	SUBA #$30
+0241 c0d1 2b 95              	BMI C1
+0242 c0d3 81 09              	CMPA #$9
+0243 c0d5 2f 0a              	BLE IN1HG
+0244 c0d7 81 11              	CMPA #$11
+0245 c0d9 2b 8d              	BMI C1
+0246 c0db 81 16              	CMPA #$16
+0247 c0dd 2e 89              	BGT C1
+0248 c0df 80 07              	SUBA #$7
+0249 c0e1 39                 IN1HG	RTS
+0250                         ;
+0251                         ;
+0252 c0e2 a6 00              OUT2H	LDAA 0,X
+0253 c0e4 8d 9d              	BSR OUTHL
+0254 c0e6 a6 00              	LDAA 0,X
+0255 c0e8 08                 	INX
+0256 c0e9 20 9c              	BRA OUTHR
+0257                         ;
+0258 c0eb 8d f5              OUT4HS	BSR OUT2H
+0259 c0ed 8d f3              OUT2HS	BSR OUT2H
+0260 c0ef 86 20              OUTS	LDAA #$20
+0261 c0f1 20 9e              	BRA OUTCH
+0262                         ;
+0263                         ; SET BREAK POINTS
+0264                         ;
+0265 c0f3 bd c2 61           BKPNT2	JSR ADDR
+0266 c0f6 ff 7f 68           	STX PC1
+0267 c0f9 a6 00              	LDAA 0,X
+0268 c0fb b7 7f 6d           	STAA BKFLG2
+0269 c0fe 27 cb              	BEQ XBK
+0270 c100 86 3f              	LDAA #$3F
+0271 c102 a7 00              	STAA 0,X
+0272 c104 bd c2 61           BKPNT	JSR ADDR
+0273 c107 ff 7f 65           	STX PB2
+0274 c10a a6 00              	LDAA 0,X
+0275 c10c b7 7f 16           	STAA BKFLG
+0276 c10f 27 ba              	BEQ XBK
+0277 c111 86 3f              	LDAA #$3F
+0278 c113 a7 00              	STAA 0,X
+0279 c115 bd c2 c4           	JSR CRLF
+0280                         ;
+0281                         ; FALL INTO GO COMMAND
+0282                         ;
+0283 c118 be 7f 0a           CONTG	LDS SP
+0284 c11b 3b                 	RTI
+0285                         ;
+0286                         ; PRINT XHI ADDRESS SUB
+0287                         ;
+0288 c11c ce 7f 0e           OUTXHI	LDX #XHI
+0289 c11f 8d ca              	BSR OUT4HS
+0290 c121 fe 7f 0e           	LDX XHI
+0291 c124 39                 	RTS
+0292                         ;
+0293                         ; VECTORED SWI ROUTINE
+0294                         ;
+0295 c125 bf 7f 0a           SFE	STS SP
+0296 c128 30                 	TSX
+0297 c129 6d 06              	TST 6,X
+0298 c12b 26 02              	BNE *+4
+0299 c12d 6a 05              	DEC 5,X
+0300 c12f 6a 06              	DEC 6,X
+0301 c131 8e 7f 62           	LDS #TSTACK
+0302 c134 7d 7f 13           	TST TFLAG
+0303 c137 27 18              	BEQ PRINT
+0304 c139 fe 7f 68           	LDX PC1
+0305 c13c b6 7f 63           	LDAA OPSAVE
+0306 c13f a7 00              	STAA 0,X
+0307 c141 7d 7f 4f           	TST BFLAG
+0308 c144 27 08              	BEQ DISPLY
+0309 c146 fe 7f 6a           	LDX BPOINT
+0310 c149 b6 7f 6c           	LDAA BPOINT+2
+0311 c14c a7 00              	STAA 0,X
+0312 c14e 7e c2 e4           DISPLY	JMP RETURN
+0313                         ;
+0314                         ; PRINT REGISTERS
+0315                         ;
+0316 c151 fe 7f 0a           PRINT	LDX SP
+0317 c154 86 06              	LDAA #6
+0318 c156 b7 7f 6e           	STAA MCONT
+0319 c159 e6 01              	LDAB 1,X
+0320 c15b 58                 	ASLB
+0321 c15c 58                 	ASLB
+0322 c15d ce c7 82           	LDX #CSET
+0323                         ;
+0324 c160 86 2d              DSOOP	LDAA #$2D
+0325 c162 58                 	ASLB
+0326 c163 24 02              	BCC DSOOP1
+0327 c165 a6 00              	LDAA 0,X
+0328 c167 bd c2 0a           DSOOP1	JSR OUTEEE
+0329 c16a 08                 	INX
+0330 c16b 7a 7f 6e           	DEC MCONT
+0331 c16e 26 f0              	BNE DSOOP
+0332 c170 ce c7 71           	LDX #BREG
+0333 c173 8d 5a              	BSR PDAT
+0334 c175 fe 7f 0a           	LDX SP
+0335 c178 08                 	INX
+0336 c179 08                 	INX
+0337 c17a bd c0 ed           	JSR OUT2HS
+0338 c17d ff 7f 10           	STX TEMP
+0339 c180 ce c7 75           	LDX #AREG
+0340 c183 8d 4a              	BSR PDAT
+0341 c185 fe 7f 10           	LDX TEMP
+0342 c188 bd c0 ed           	JSR OUT2HS
+0343 c18b ff 7f 10           	STX TEMP
+0344 c18e ce c7 78           	LDX #XREG
+0345 c191 8d 3c              	BSR PDAT
+0346 c193 fe 7f 10           	LDX TEMP
+0347 c196 8d 52              	BSR PRTS
+0348 c198 ff 7f 10           	STX TEMP
+0349 c19b 7d 7f 13           	TST TFLAG
+0350 c19e 26 0a              	BNE PNTS
+0351 c1a0 ce c7 7e           	LDX #PCTR
+0352 c1a3 8d 2a              	BSR PDAT
+0353 c1a5 fe 7f 10           	LDX TEMP
+0354 c1a8 8d 40              	BSR PRTS
+0355 c1aa ce c7 7b           PNTS	LDX #SREG
+0356 c1ad 8d 20              	BSR PDAT
+0357 c1af ce 7f 0a           	LDX #SP
+0358 c1b2 7d 7f 13           	TST TFLAG
+0359 c1b5 26 22              	BNE PRINTS
+0360 c1b7 8d 31              	BSR PRTS
+0361                         ;
+0362                         ; CHECK IF ANY BREAK POINTS ARE SET
+0363                         ;
+0364 c1b9 b6 7f 16           	LDAA BKFLG
+0365 c1bc 26 0f              	BNE C2
+0366 c1be fe 7f 65           	LDX PB2
+0367 c1c1 a7 00              	STAA 0,X
+0368 c1c3 b6 7f 6d           	LDAA BKFLG2
+0369 c1c6 27 05              	BEQ C2
+0370 c1c8 fe 7f 68           	LDX PC1
+0371 c1cb a7 00              	STAA 0,X
+0372 c1cd 20 1e              C2	BRA CR8
+0373 c1cf 7e c0 9a           PDAT	JMP PDATA1
+0374                         ;
+0375                         ; SET ECHO FUNCTION
+0376                         ;
+0377 c1d2 5f                 ECHON	CLRB
+0378 c1d3 50                 PRNTON NEGB
+0379 c1d4 f7 7f 0d           ECHOFF STAB ECHO
+0380 c1d7 20 14              	BRA CR8
+0381                         ;
+0382                         ;  PRINT STACK POINTER
+0383                         ;
+0384 c1d9 e6 00              PRINTS LDAB 0,X
+0385 c1db a6 01              	LDAA 1,X
+0386 c1dd 8b 07              	ADDA #7
+0387 c1df c9 00              	ADCB #0
+0388 c1e1 f7 7f 10           	STAB TEMP
+0389 c1e4 b7 7f 11           	STAA TEMP+1
+0390 c1e7 ce 7f 10           	LDX #TEMP
+0391 c1ea 7e c0 eb           PRTS	JMP OUT4HS
+0392                         ;
+0393                         ;changes from version 1 are below see 006.jpg
+0394                         ;
+0395 c1ed 20 55              CR8	BRA IFILL1
+0396                         ;
+0397                         ;     SAVE X REGISTER
+0398                         ;
+0399 c1ef ff 7f 14           SAV	STX XTEMP
+0400 c1f2 39                 	RTS
+0401                         ;
+0402                         ;	INPUT ONE CHAR INTO A-REGISTER
+0403                         ;
+0404 c1f3 8d fa              INEEE 	BSR	SAV
+0405 c1f5 b6 80 18           IN1	LDAA	ACIACS
+0406 c1f8 47                 	ASRA
+0407 c1f9 24 fa              	BCC	IN1	;RECEIVE NOT READY
+0408 c1fb b6 80 19           	LDAA	ACIADA	;INPUT CHARACTER
+0409 c1fe 84 7f              	ANDA	#$7F	;RESET PARITY BIT
+0410 c200 81 7f              	CMPA	#$7F
+0411 c202 27 f1              	BEQ	IN1	;IF RUBOUT, GET NEXT CHAR
+0412 c204 7d 7f 0d           	TST ECHO
+0413 c207 2f 01              	BLE OUTEEE
+0414 c209 39                 	RTS
+0415                         ;
+0416                         ;	OUTPUT ONE CHAR 
+0417                         ;
+0418 c20a 36                 OUTEEE	PSHA
+0419 c20b b6 80 18           OUTEEE1 LDAA	ACIACS
+0420 c20e 47                 	ASRA
+0421 c20f 47                 	ASRA
+0422 c210 24 f9              	BCC	OUTEEE1
+0423 c212 32                 	PULA
+0424 c213 b7 80 19           	STAA	ACIADA
+0425 c216 39                 	RTS
+0426                         ;
+0427                         ; changes from V1 are above
+0428                         ;
+0429                         ;  HERE ON JUMP COMMAND
+0430                         ;
+0431 c217 ce c7 b0           JUMP	LDX #TOADD
+0432 c21a 8d 32              	BSR ENDADD+3
+0433 c21c 8e 7f 44           	LDS #STACK
+0434 c21f 6e 00              	JMP 0,X
+0435                         ;
+0436                         ;  ASCII IN "@" COMMAND
+0437                         ;
+0438 c221 8d 23              ASCII	BSR BAD2
+0439 c223 08                 	INX
+0440 c224 09                 ASC01	DEX
+0441 c225 8d cc              ASC02	BSR INEEE
+0442 c227 81 08              	CMPA #$8
+0443 c229 27 f9              	BEQ ASC01
+0444 c22b a7 00              	STAA 0,X
+0445 c22d 81 04              	CMPA #$4
+0446 c22f 27 60              	BEQ CR9
+0447 c231 08                 	INX
+0448 c232 20 f1              	BRA ASC02
+0449                         ;
+0450                         ;  FILL MEMORY "I" COMMAND
+0451                         ;
+0452 c234 8d 1e              IFILL	BSR LIMITS
+0453 c236 8d 2e              	BSR VALUE
+0454 c238 fe 7f 04           	LDX BEGA
+0455 c23b 09                 	DEX
+0456 c23c 08                 IFILL2	INX
+0457 c23d a7 00              	STAA 0,X
+0458 c23f bc 7f 06           	CPX ENDA
+0459 c242 26 f8              	BNE IFILL2
+0460 c244 20 4b              IFILL1	BRA CR9
+0461                         ;
+0462                         ;  INPUT DATA SUB ROUTINE
+0463                         ;
+0464 c246 ce c7 96           BAD2	LDX #FROMAD
+0465 c249 20 03              	BRA *+5
+0466 c24b ce c7 a3           ENDADD	LDX #THRUAD
+0467 c24e bd c0 9a           	JSR PDATA1
+0468 c251 7e c0 6a           	JMP BADDR
+0469 c254 8d f0              LIMITS	BSR BAD2
+0470 c256 ff 7f 04           	STX BEGA
+0471 c259 8d f0              	BSR ENDADD
+0472 c25b ff 7f 06           	STX ENDA
+0473 c25e 7e c2 c4           	JMP CRLF
+0474 c261 fe c7 8c           ADDR	LDX ADASC
+0475 c264 20 e8              	BRA ENDADD+3
+0476 c266 ce c7 b9           VALUE	LDX #VALASC
+0477 c269 bd c0 9a           	JSR PDATA1
+0478 c26c 7e c0 78           	JMP BYTE
+0479                         ;
+0480                         ; BLOCK MOVE "M" COMMAND
+0481                         ;
+0482 c26f 8d e3              MOVE	BSR LIMITS
+0483 c271 ce c7 b0           	LDX #TOADD
+0484 c274 8d d8              	BSR ENDADD+3
+0485 c276 fe 7f 04           	LDX BEGA
+0486 c279 09                 	DEX
+0487 c27a 08                 BMC1	INX
+0488 c27b a6 00              	LDAA 0,X
+0489 c27d ff 7f 04           	STX BEGA
+0490 c280 fe 7f 0e           	LDX XHI
+0491 c283 a7 00              	STAA 0,X
+0492 c285 08                 	INX
+0493 c286 ff 7f 0e           	STX XHI
+0494 c289 fe 7f 04           	LDX BEGA
+0495 c28c bc 7f 06           	CPX ENDA
+0496 c28f 26 e9              	BNE BMC1
+0497 c291 7e c0 1f           CR9	JMP CONTRL
+0498                         ;
+0499                         ;  SEARCH MEMORY "S" COMMAND
+0500                         ;
+0501 c294 8d be              FIND	BSR LIMITS
+0502 c296 8d ce              	BSR VALUE
+0503 c298 16                 	TAB
+0504 c299 fe 7f 04           	LDX BEGA
+0505 c29c 09                 	DEX
+0506 c29d 08                 SMC1	INX
+0507 c29e a6 00              	LDAA 0,X
+0508 c2a0 11                 	CBA
+0509 c2a1 26 08              	BNE SMC2
+0510 c2a3 ff 7f 0e           	STX XHI
+0511 c2a6 8d 1c              	BSR CRLF
+0512 c2a8 bd c1 1c           	JSR OUTXHI
+0513 c2ab bc 7f 06           SMC2	CPX ENDA
+0514 c2ae 26 ed              	BNE SMC1
+0515 c2b0 20 df              	BRA CR9
+0516                         ;
+0517                         ;  SUB ROUTINE TO ADD SPACE
+0518                         ;
+0519 c2b2 86 20              SKIP	LDAA #$20
+0520 c2b4 bd c2 0a           	JSR OUTEEE
+0521 c2b7 5a                 	DECB 
+0522 c2b8 26 f8              	BNE SKIP
+0523 c2ba 39                 	RTS
+0524                         ;
+0525                         ;  PRINT BYTE IN A REGISTER
+0526                         ;
+0527 c2bb b7 7f 67           PNTBYT	STAA BYTECT
+0528 c2be ce 7f 67           	LDX #BYTECT
+0529 c2c1 7e c0 e2           	JMP OUT2H
+0530                         ;
+0531                         ;  CARRIAGE RETURN NON PROMPT
+0532                         ;
+0533 c2c4 ce c7 88           CRLF	LDX #CRLFAS
+0534 c2c7 7e c0 9a           	JMP PDATA1
+0535                         ;
+0536                         ;  DISASSEMBLE "D" COMMAND
+0537                         ;
+0538 c2ca bd c2 46           DISSA	JSR BAD2
+0539 c2cd 20 1d              	BRA DISS
+0540                         ;
+0541                         ;  TRACE COMMAND "T"
+0542                         ;
+0543 c2cf bd c2 46           TRACE	JSR 	BAD2
+0544 c2d2 8d f0              	BSR 	CRLF
+0545 c2d4 fe 7f 0a           	LDX 	SP
+0546 c2d7 f6 7f 0e           	LDAB 	XHI
+0547 c2da e7 06              	STAB 	6,X
+0548 c2dc b6 7f 0f           	LDAA 	XLOW
+0549 c2df a7 07              	STAA 	7,X
+0550 c2e1 7c 7f 13           KONTIN	INC 	TFLAG
+0551 c2e4 bd c1 51           RETURN	JSR 	PRINT
+0552 c2e7 fe 7f 0a           	LDX 	SP
+0553 c2ea ee 06              	LDX 	6,X
+0554 c2ec ff 7f 68           DISS	STX 	PC1
+0555 c2ef 8d d3              DISIN	BSR 	CRLF
+0556 c2f1 ce 7f 68           	LDX 	#PC1
+0557 c2f4 bd c0 eb           	JSR 	OUT4HS
+0558 c2f7 ce 7f 4f           	LDX 	#BFLAG
+0559 c2fa 86 05              	LDAA 	#5
+0560 c2fc 6f 00              CLEAR	CLR 	0,X
+0561 c2fe 08                 	INX
+0562 c2ff 4a                 	DECA
+0563 c300 26 fa              	BNE 	CLEAR
+0564 c302 fe 7f 68           	LDX 	PC1
+0565 c305 e6 00              	LDAB 0,X
+0566 c307 bd c0 ed           	JSR 	OUT2HS
+0567 c30a ff 7f 68           	STX 	PC1
+0568 c30d a6 00              	LDAA 	0,X
+0569 c30f b7 7f 65           	STAA 	PB2
+0570 c312 a6 01              	LDAA 	1,X
+0571 c314 b7 7f 66           	STAA 	PB3
+0572 c317 f7 7f 64           	STAB 	PB1
+0573 c31a 17                 	TBA
+0574 c31b bd c5 18           	JSR 	TBLKUP
+0575 c31e b6 7f 10           	LDAA 	TEMP
+0576 c321 81 2a              	CMPA 	#$2A
+0577 c323 26 03              	BNE 	OKOP
+0578 c325 7e c3 e9           	JMP 	NOTBB
+0579 c328 b6 7f 64           OKOP	LDAA 	PB1
+0580 c32b 81 8d              	CMPA 	#$8D
+0581 c32d 26 05              	BNE 	NEXT
+0582 c32f 7c 7f 4f           	INC 	BFLAG
+0583 c332 20 2d              	BRA 	PUT1
+0584 c334 84 f0              NEXT	ANDA 	#$F0
+0585 c336 81 60              	CMPA 	#$60
+0586 c338 27 18              	BEQ 	ISX
+0587 c33a 81 a0              	CMPA 	#$A0
+0588 c33c 27 14              	BEQ  	ISX
+0589 c33e 81 e0              	CMPA	#$E0
+0590 c340 27 10               	BEQ  	ISX
+0591 c342 81 80              	CMPA	#$80
+0592 c344 27 04              	BEQ 	IMM
+0593 c346 81 c0              	CMPA 	#$C0
+0594 c348 26 17              	BNE 	PUT1
+0595 c34a 7c 7f 50           IMM	INC 	MFLAG
+0596 c34d ce c7 59           	LDX 	#SPLBD0
+0597 c350 20 0c              	BRA 	PUT
+0598 c352 7c 7f 51           ISX	INC 	XFLAG
+0599 c355 b6 7f 65           	LDAA 	PB2
+0600 c358 bd c2 bb           	JSR	PNTBYT
+0601 c35b ce c7 5c           	LDX 	#COMMX
+0602 c35e bd c0 9a           PUT	JSR 	PDATA1
+0603 c361 fe 7f 68           PUT1	LDX 	PC1
+0604 c364 b6 7f 64           	LDAA 	PB1
+0605 c367 81 8c              	CMPA 	#$8C
+0606 c369 27 1d              	BEQ 	BYT3
+0607 c36b 81 8e              	CMPA 	#$8E
+0608 c36d 27 19              	BEQ 	BYT3
+0609 c36f 81 ce              	CMPA 	#$CE  
+0610 c371 27 15              	BEQ 	BYT3
+0611 c373 84 f0              	ANDA 	#$F0
+0612 c375 81 20              	CMPA 	#$20
+0613 c377 26 05              	BNE 	NOTB
+0614 c379 7c 7f 4f           	INC 	BFLAG
+0615 c37c 20 25              	BRA 	BYT2
+0616 c37e 81 60              NOTB	CMPA 	#$60
+0617 c380 25 43              	BCS 	BYT1
+0618 c382 84 30              	ANDA 	#$30
+0619 c384 81 30              	CMPA 	#$30
+0620 c386 26 1b              	BNE 	BYT2
+0621 c388 7c 7f 53           BYT3	INC 	BITE3
+0622 c38b 7d 7f 50           	TST 	MFLAG
+0623 c38e 26 05              	BNE 	BYT31
+0624 c390 86 24              	LDAA 	#$24
+0625 c392 bd c2 0a           	JSR 	OUTEEE
+0626 c395 a6 00              BYT31	LDAA 	0,X
+0627 c397 08                 	INX
+0628 c398 ff 7f 68           	STX 	PC1
+0629 c39b bd c2 bb           	JSR 	PNTBYT
+0630 c39e fe 7f 68           	LDX 	PC1
+0631 c3a1 20 03              	BRA 	BYT21
+0632 c3a3 7c 7f 52           BYT2	INC 	BITE2
+0633 c3a6 a6 00              BYT21	LDAA 	0,X
+0634 c3a8 08                 	INX
+0635 c3a9 ff 7f 68           	STX 	PC1
+0636 c3ac 7d 7f 51           	TST 	XFLAG
+0637 c3af 26 14              	BNE 	BYT1
+0638 c3b1 7d 7f 53           	TST 	BITE3
+0639 c3b4 26 0c              	BNE 	BYT22
+0640 c3b6 7d 7f 50           	TST 	MFLAG
+0641 c3b9 26 07              	BNE 	BYT22
+0642 c3bb 16                 	TAB
+0643 c3bc 86 24              	LDAA 	#$24
+0644 c3be bd c2 0a           	JSR 	OUTEEE
+0645 c3c1 17                 	TBA
+0646 c3c2 bd c2 bb           BYT22	JSR 	PNTBYT
+0647 c3c5 7d 7f 4f           BYT1	TST 	BFLAG
+0648 c3c8 27 1f              	BEQ 	NOTBB
+0649 c3ca c6 03              	LDAB 	#3
+0650 c3cc bd c2 b2           	JSR 	SKIP
+0651 c3cf 4f                 	CLRA
+0652 c3d0 f6 7f 65           	LDAB 	PB2
+0653 c3d3 2c 02              	BGE 	DPOS
+0654 c3d5 86 ff              	LDAA 	#$FF
+0655 c3d7 fb 7f 69           DPOS	ADDB 	PC2
+0656 c3da b9 7f 68           	ADCA 	PC1
+0657 c3dd b7 7f 6a           	STAA 	BPOINT
+0658 c3e0 f7 7f 6b           	STAB 	BPOINT+1
+0659 c3e3 ce 7f 6a           	LDX 	#BPOINT
+0660 c3e6 bd c0 eb           	JSR 	OUT4HS
+0661                         ;
+0662                         ; PRINT ASCII VALUE OF INST
+0663                         ;
+0664 c3e9 c6 0d              NOTBB	LDAB #$D
+0665 c3eb 86 01              	LDAA #1
+0666 c3ed 7d 7f 52           	TST BITE2
+0667 c3f0 27 19              	BEQ PAVOI3
+0668 c3f2 c6 01              	LDAB #1
+0669 c3f4 7d 7f 4f           	TST BFLAG
+0670 c3f7 26 0e              	BNE PAVOI2
+0671 c3f9 c6 08              	LDAB #8
+0672 c3fb 7d 7f 50           	TST MFLAG
+0673 c3fe 26 07              	BNE PAVOI2
+0674 c400 7d 7f 50           	TST MFLAG
+0675 c403 26 02              	BNE PAVOI2
+0676 c405 c6 09              	LDAB #9
+0677 c407 86 02              PAVOI2	LDAA #2
+0678 c409 20 10              	BRA PAVOI8
+0679                         ;
+0680 c40b 7d 7f 53           PAVOI3	TST BITE3
+0681 c40e 27 0b              	BEQ PAVOI8
+0682 c410 86 03              	LDAA #3
+0683 c412 c6 06              	LDAB #6
+0684 c414 7d 7f 50           	TST MFLAG
+0685 c417 27 02              	BEQ PAVOI8
+0686 c419 c6 05              	LDAB #5
+0687 c41b 36                 PAVOI8	PSHA
+0688 c41c bd c2 b2           	JSR SKIP
+0689 c41f 33                 	PULB
+0690 c420 ce 7f 64           	LDX #PB1
+0691 c423 a6 00              PAVOI4	LDAA 0,X
+0692 c425 81 20              	CMPA #$20
+0693 c427 2f 04              	BLE PAVOI5
+0694 c429 81 60              	CMPA #$60
+0695 c42b 2f 02              	BLE PAVOI9
+0696 c42d 86 2e              PAVOI5	LDAA #$2E
+0697 c42f 08                 PAVOI9	INX
+0698 c430 bd c2 0a           	JSR OUTEEE
+0699 c433 5a                 	DECB
+0700 c434 26 ed              	BNE PAVOI4
+0701 c436 bd c1 f3           NOT1	JSR INEEE
+0702 c439 16                 	TAB
+0703 c43a bd c0 ef           	JSR OUTS
+0704 c43d c1 20              	CMPB #$20
+0705 c43f 27 34              	BEQ DOT
+0706                         ;
+0707                         ;  CHECK INPUT COMMAND
+0708                         ;  A, B, C, X, OR S
+0709                         ;
+0710 c441 fe 7f 0a           CKCBA	LDX SP
+0711 c444 08                 	INX
+0712 c445 c1 43              	CMPB #$43
+0713 c447 27 1c              	BEQ RDC
+0714 c449 08                 	INX
+0715 c44a c1 42              	CMPB #$42
+0716 c44c 27 17              	BEQ RDC
+0717 c44e 08                 	INX
+0718 c44f c1 41              	CMPB #$41
+0719 c451 27 12              	BEQ RDC
+0720 c453 08                 	INX
+0721 c454 c1 58              	CMPB #$58
+0722 c456 27 07              	BEQ RDX
+0723 c458 ce 7f 0a           	LDX #SP
+0724 c45b c1 53              	CMPB #$53
+0725 c45d 26 13              	BNE RETNOT
+0726 c45f bd c0 78           RDX	JSR BYTE
+0727 c462 a7 00              	STAA 0,X
+0728 c464 08                 	INX
+0729 c465 bd c0 78           RDC	JSR BYTE
+0730 c468 a7 00              	STAA 0,X
+0731 c46a bd c2 c4           	JSR CRLF
+0732 c46d bd c1 51           	JSR PRINT
+0733                         ;
+0734                         ;  WILL RETURN HERE IN TRACE
+0735                         ;
+0736 c470 20 c4              	BRA NOT1
+0737 c472 7e c0 1f           RETNOT	JMP CONTRL
+0738 c475 7d 7f 13           DOT	TST TFLAG
+0739 c478 26 03              	BNE DOT1
+0740 c47a 7e c2 ef           	JMP DISIN
+0741                         ;
+0742 c47d c6 3f              DOT1	LDAB #$3F
+0743 c47f b6 7f 64           	LDAA PB1
+0744 c482 81 8d              	CMPA #$8D
+0745 c484 26 09              	BNE TSTB
+0746 c486 fe 7f 6a           	LDX BPOINT
+0747 c489 ff 7f 68           	STX PC1
+0748 c48c 7f 7f 4f           	CLR BFLAG
+0749 c48f 7d 7f 4f           TSTB	TST BFLAG
+0750 c492 27 0c              	BEQ TSTJ
+0751 c494 fe 7f 6a           	LDX BPOINT
+0752 c497 a6 00              	LDAA 0,X
+0753 c499 b7 7f 6c           	STAA BPOINT+2
+0754 c49c e7 00              	STAB 0,X
+0755 c49e 20 48              	BRA EXEC
+0756                         ;
+0757 c4a0 81 6e              TSTJ	CMPA #$6E
+0758 c4a2 27 14              	BEQ ISXD
+0759 c4a4 81 ad              	CMPA #$AD
+0760 c4a6 27 10              	BEQ ISXD
+0761 c4a8 81 7e              	CMPA #$7E
+0762 c4aa 27 04              	BEQ ISJ
+0763 c4ac 81 bd              	CMPA #$BD
+0764 c4ae 26 1c              	BNE NOTJ
+0765 c4b0 fe 7f 65           ISJ	LDX PB2
+0766 c4b3 ff 7f 68           	STX PC1
+0767 c4b6 20 30              	BRA EXEC
+0768 c4b8 fe 7f 0a           ISXD	LDX SP
+0769 c4bb a6 05              	LDAA 5,X
+0770 c4bd bb 7f 65           	ADDA PB2
+0771 c4c0 b7 7f 69           	STAA PC2
+0772 c4c3 a6 04              	LDAA 4,X
+0773 c4c5 89 00              	ADCA #0
+0774 c4c7 b7 7f 68           	STAA PC1
+0775 c4ca 20 1c              	BRA EXEC
+0776                         ;
+0777 c4cc fe 7f 0a           NOTJ	LDX SP
+0778 c4cf 81 39              	CMPA #$39
+0779 c4d1 26 04              	BNE NOTRTS
+0780 c4d3 ee 08              NOTJ1	LDX 8,X
+0781 c4d5 20 06              	BRA EXR
+0782                         ;
+0783 c4d7 81 38              NOTRTS	CMPA #$38
+0784 c4d9 26 05              	BNE NOTRTI
+0785 c4db ee 0d              	LDX 13,X
+0786 c4dd ff 7f 68           EXR	STX PC1
+0787 c4e0 81 3f              NOTRTI	CMPA #$3F
+0788 c4e2 27 15              	BEQ NONO
+0789 c4e4 81 3e              	CMPA #$3E
+0790 c4e6 27 11              	BEQ NONO
+0791                         ;
+0792 c4e8 fe 7f 68           EXEC	LDX PC1
+0793 c4eb a6 00              	LDAA 0,X
+0794 c4ed b7 7f 63           	STAA OPSAVE
+0795 c4f0 e7 00              	STAB 0,X
+0796 c4f2 e1 00              	CMPB 0,X
+0797 c4f4 26 06              	BNE CKROM
+0798 c4f6 7e c1 18           	JMP CONTG
+0799                         ;
+0800 c4f9 7e c0 64           NONO	JMP LOAD19
+0801                         ;
+0802 c4fc b6 7f 68           CKROM	LDAA PC1
+0803 c4ff 81 e0              	CMPA #$E0
+0804 c501 25 f6              	BCS NONO
+0805                         ;
+0806                         ;  GET JSR OR JMP
+0807                         ;
+0808 c503 fe 7f 0a           	LDX SP
+0809 c506 b6 7f 64           	LDAA PB1
+0810 c509 81 7e              	CMPA #$7E
+0811 c50b 27 c6              	BEQ NOTJ1
+0812 c50d 81 bd              	CMPA #$BD
+0813 c50f 26 e8              	BNE NONO
+0814 c511 ee 06              	LDX 6,X
+0815 c513 08                 	INX
+0816 c514 08                 	INX
+0817 c515 08                 	INX
+0818 c516 20 9b              	BRA ISJ+3
+0819                         ;
+0820                         ;Disassembler "PSH A = MISSING A" bug removed......
+0821                         ;
+0822                         ;  INSTRUCTION NMEMONIC LOOKUP
+0823                         ;  ROUTINE FOR 68XX OP CODES
+0824                         ;
+0825 c518 81 40              TBLKUP CMPA #$40
+0826 c51a 24 26              	BCC IMLR6
+0827 c51c bd c5 b0           IMLR1	JSR PNT3C
+0828 c51f b6 7f 64           	LDAA PB1
+0829 c522 81 32              	CMPA #$32
+0830 c524 27 11              	BEQ IMLR3
+0831 c526 81 36              	CMPA #$36  ;had £ instead of #
+0832 c528 27 0d              	BEQ IMLR3
+0833 c52a 81 33              	CMPA #$33
+0834 c52c 27 0e              	BEQ IMLR4
+0835 c52e 81 37              	CMPA #$37
+0836 c530 27 0a              	BEQ IMLR4
+0837 c532 ce c7 5f           IMLR2	LDX #BLANK
+0838 c535 20 08              	BRA IMLR5
+0839                         ;
+0840 c537 ce c7 63           IMLR3	LDX #PNTA
+0841 c53a 20 03              	BRA IMLR5	;end of "bug removed"
+0842                         ;
+0843 c53c ce c7 67           IMLR4	LDX #PNTB
+0844 c53f 7e c0 9a           IMLR5	JMP PDATA1
+0845 c542 81 4e              IMLR6	CMPA #$4E
+0846 c544 27 04              	BEQ IMLR7
+0847 c546 81 5e              	CMPA #$5E
+0848 c548 26 03              	BNE IMLR8
+0849                         ;
+0850 c54a 4f                 IMLR7	CLRA
+0851 c54b 20 cf              	BRA IMLR1
+0852                         ;
+0853 c54d 81 80              IMLR8	CMPA #$80
+0854 c54f 24 19              	BCC IMLR9
+0855 c551 84 4f              	ANDA #$4F
+0856 c553 bd c5 b0           	JSR PNT3C
+0857 c556 b6 7f 10           	LDAA TEMP
+0858 c559 81 2a              	CMPA #$2A
+0859 c55b 27 d5              	BEQ IMLR2
+0860 c55d b6 7f 64           	LDAA PB1
+0861 c560 81 60              	CMPA #$60
+0862 c562 24 ce              	BCC IMLR2
+0863 c564 84 10              	ANDA #$10
+0864 c566 27 cf              	BEQ IMLR3
+0865 c568 20 d2              	BRA IMLR4
+0866                         ;
+0867 c56a 84 3f              IMLR9	ANDA #$3F
+0868 c56c 81 0f              	CMPA #$F
+0869 c56e 27 da              	BEQ IMLR7
+0870 c570 81 07              	CMPA #$7
+0871 c572 27 d6              	BEQ IMLR7
+0872 c574 84 0f              	ANDA #$F
+0873 c576 81 03              	CMPA #$3
+0874 c578 27 d0              	BEQ IMLR7
+0875 c57a 81 0c              	CMPA #$C
+0876 c57c 2c 0e              	BGE IMLR10
+0877 c57e 8b 50              	ADDA #$50
+0878 c580 bd c5 b0           	JSR PNT3C
+0879 c583 b6 7f 64           	LDAA PB1
+0880 c586 84 40              	ANDA #$40
+0881 c588 27 ad              	BEQ IMLR3
+0882 c58a 20 b0              	BRA IMLR4
+0883                         ;
+0884 c58c b6 7f 64           IMLR10	LDAA PB1
+0885 c58f 81 8d              	CMPA #$8D
+0886 c591 26 04              	BNE IMLR11
+0887 c593 86 53              	LDAA #$53
+0888 c595 20 85              	BRA IMLR1
+0889                         ;
+0890 c597 81 c0              IMLR11	CMPA #$C0
+0891 c599 24 0a              	BCC IMLR12
+0892 c59b 81 9d              	CMPA #$9D
+0893 c59d 27 ab              	BEQ IMLR7
+0894 c59f 84 0f              	ANDA #$F
+0895 c5a1 8b 50              	ADDA #$50
+0896 c5a3 20 08              	BRA IMLR13
+0897                         ;
+0898 c5a5 84 0f              IMLR12	ANDA #$F
+0899 c5a7 8b 52              	ADDA #$52
+0900 c5a9 81 60              	CMPA #$60
+0901 c5ab 2d 9d              	BLT IMLR7
+0902                         ;
+0903 c5ad 7e c5 1c           IMLR13	JMP IMLR1
+0904                         ;
+0905 c5b0 5f                 PNT3C	CLRB
+0906 c5b1 b7 7f 10           	STAA TEMP
+0907 c5b4 48                 	ASLA
+0908 c5b5 bb 7f 10           	ADDA TEMP
+0909 c5b8 c9 00              	ADCB #$0
+0910 c5ba ce c6 33           	LDX #TBL
+0911 c5bd ff 7f 14           	STX XTEMP
+0912 c5c0 bb 7f 15           	ADDA XTEMP+1
+0913 c5c3 f9 7f 14           	ADCB XTEMP
+0914 c5c6 f7 7f 14           	STAB XTEMP
+0915 c5c9 b7 7f 15           	STAA XTEMP+1
+0916 c5cc fe 7f 14           	LDX XTEMP
+0917 c5cf a6 00              	LDAA 0,X
+0918 c5d1 b7 7f 10           	STAA TEMP
+0919 c5d4 8d 06              	BSR OUTA
+0920 c5d6 a6 01              	LDAA 1,X
+0921 c5d8 8d 02              	BSR OUTA
+0922 c5da a6 02              	LDAA 2,X
+0923                         ;
+0924 c5dc 7e c2 0a           OUTA	JMP OUTEEE
+0925                         ;
+0926                         ;  "V" COMMAND
+0927                         ;
+0928 c5df bd c2 46           VIEW	JSR BAD2
+0929 c5e2 86 08              VCOM1	LDAA #8
+0930 c5e4 b7 7f 6e           	STAA MCONT
+0931 c5e7 bd c2 c4           VCOM5	JSR CRLF
+0932 c5ea bd c1 1c           	JSR OUTXHI
+0933 c5ed c6 10              	LDAB #$10
+0934 c5ef bd c0 ed           VCOM9	JSR OUT2HS
+0935 c5f2 5a                 	DECB
+0936 c5f3 c5 03              	BITB #3
+0937 c5f5 26 05              	BNE VCOM10
+0938 c5f7 bd c0 ef           	JSR OUTS
+0939 c5fa c1 00              	CMPB #$0
+0940 c5fc 26 f1              VCOM10	BNE VCOM9
+0941 c5fe bd c2 c4           	JSR CRLF
+0942 c601 c6 05              	LDAB #$5
+0943 c603 bd c2 b2           	JSR SKIP
+0944 c606 fe 7f 0e           	LDX XHI
+0945 c609 c6 10              	LDAB #$10
+0946 c60b a6 00              VCOM2	LDAA 0,X
+0947 c60d 81 20              	CMPA #$20
+0948 c60f 25 04              	BCS VCOM3
+0949 c611 81 5f              	CMPA #$5F
+0950 c613 25 02              	BCS VCOM4
+0951 c615 86 2e              VCOM3	LDAA #$2E
+0952 c617 8d c3              VCOM4	BSR OUTA
+0953 c619 08                 	INX
+0954 c61a 5a                 	DECB
+0955 c61b 26 ee              	BNE VCOM2
+0956 c61d ff 7f 0e           	STX XHI
+0957 c620 7a 7f 6e           	DEC MCONT
+0958 c623 26 c2              	BNE VCOM5
+0959 c625 bd c1 f3           	JSR INEEE
+0960 c628 81 20              	CMPA #$20
+0961 c62a 27 b6              	BEQ VCOM1
+0962 c62c 81 56              	CMPA #$56
+0963 c62e 27 af              	BEQ VIEW
+0964 c630 7e c0 1f           	JMP CONTRL
+0965                         ;
+0966                         ; MNKEMONIC TABLE
+0967                         ;
+0968 c633 2a 2a 2a 4e 4f 50  TBL	FCC "***NOPNOP***"
+     4e 4f 50 2a 2a 2a
+0969 c63f 2a 2a 2a 2a 2a 2a  	FCC "******TAPTPA"
+     54 41 50 54 50 41
+0970 c64b 49 4e 58 44 45 58  	FCC "INXDEXCLVSEV"
+     43 4c 56 53 45 56
+0971 c657 43 4c 43 53 45 43  	FCC "CLCSECCLISEI"
+     43 4c 49 53 45 49
+0972 c663 53 42 41 43 42 41  	FCC "SBACBA******"
+     2a 2a 2a 2a 2a 2a
+0973 c66f 2a 2a 2a 2a 2a 2a  	FCC "******TABTBA"
+     54 41 42 54 42 41
+0974 c67b 2a 2a 2a 44 41 41  	FCC "***DAA***ABA"
+     2a 2a 2a 41 42 41
+0975 c687 2a 2a 2a 2a 2a 2a  	FCC "************"
+     2a 2a 2a 2a 2a 2a
+0976 c693 42 52 41 2a 2a 2a  	FCC "BRA***BHIBLS"
+     42 48 49 42 4c 53
+0977 c69f 42 43 43 42 43 53  	FCC "BCCBCSBNEBEQ"
+     42 4e 45 42 45 51
+0978 c6ab 42 56 43 42 56 53  	FCC "BVCBVSBPLBMI"
+     42 50 4c 42 4d 49
+0979 c6b7 42 47 45 42 4c 54  	FCC "BGEBLTBGTBLE"
+     42 47 54 42 4c 45
+0980 c6c3 54 53 58 49 4e 53  	FCC "TSXINSPULPUL"
+     50 55 4c 50 55 4c
+0981 c6cf 44 45 53 54 58 53  	FCC "DESTXSPSHPSH"
+     50 53 48 50 53 48
+0982 c6db 2a 2a 2a 52 54 53  	FCC "***RTS***RTI"
+     2a 2a 2a 52 54 49
+0983 c6e7 2a 2a 2a 2a 2a 2a  	FCC "******WAISWI"
+     57 41 49 53 57 49
+0984 c6f3 4e 45 47 2a 2a 2a  	FCC "NEG******COM"
+     2a 2a 2a 43 4f 4d
+0985 c6ff 4c 53 52 2a 2a 2a  	FCC "LSR***RORASR"
+     52 4f 52 41 53 52
+0986 c70b 41 53 4c 52 4f 4c  	FCC "ASLROLDEC***"
+     44 45 43 2a 2a 2a
+0987 c717 49 4e 43 54 53 54  	FCC "INCTSTJMPCLR"
+     4a 4d 50 43 4c 52
+0988 c723 53 55 42 43 4d 50  	FCC "SUBCMPSBCBSR"
+     53 42 43 42 53 52
+0989 c72f 41 4e 44 42 49 54  	FCC "ANDBITLDASTA"
+     4c 44 41 53 54 41
+0990 c73b 45 4f 52 41 44 43  	FCC "EORADCORAADD"
+     4f 52 41 41 44 44
+0991 c747 43 50 58 4a 53 52  	FCC "CPXJSRLDSSTS"
+     4c 44 53 53 54 53
+0992 c753 4c 44 58 53 54 58  	FCC "LDXSTX"
+0993 c759 23 24              SPLBD0 	FCC "#$"
+0994 c75b 04                 	 FCB $4
+0995 c75c 2c 58 04           COMMX	 FCB $2C,$58,$04
+0996 c75f 20 20 20           BLANK	 FCB $20,$20,$20
+0997 c762 04                 	 FCB $04
+0998 c763 20 41 20           PNTA	 FCC " A "
+0999 c766 04                 	 FCB $04
+1000 c767 20 42 20           PNTB	 FCC " B "
+1001 c76a 04                 	 FCB $04
+1002 c76b 0d 0a 15 13 3e 04  MCL	 FCB $D,$A,$15,$13,$3E,$04
+1003 c771 20 42 3d 04        BREG	 FCB $20,$42,$3D,$04
+1004 c775 41 3d 04           AREG	 FCB $41,$3D,$04
+1005 c778 58 3d 04           XREG	 FCB $58,$3D,$04
+1006 c77b 53 3d 04           SREG	 FCB $53,$3D,$04
+1007 c77e 50 43 3d 04        PCTR	 FCB $50,$43,$3D,$04
+1008 c782 48 49 4e 5a 56 43  CSET	 FCB $48,$49,$4E,$5A,$56,$43
+1009 c788 0d 0a 15 04        CRLFAS 	 FCB $0D,$0A,$15,$04
+1010 c78c 0d 0a              ADASC	 FCB $0D,$0A
+1011 c78e 42 4b 41 44 44 52  	 FCB $42,$4B,$41,$44,$44,$52,$20,$04
+     20 04
+1012 c796 0d 0a 46 52 4f 4d  FROMAD	 FCB $0D,$0A,$46,$52,$4F,$4D,$20
+     20
+1013 c79d 41 44 44 52 20 04  	 FCB $41,$44,$44,$52,$20,$04
+1014 c7a3 0d 0a 54 48 52 55  THRUAD 	 FCB $0D,$0A,$54,$48,$52,$55,$20,$41
+     20 41
+1015 c7ab 44 44 52 20 04     	 FCB $44,$44,$52,$20,$04
+1016 c7b0 54 4f 20 41 44 44  TOADD	 FCB $54,$4F,$20,$41,$44,$44,$52,$20,$04
+     52 20 04
+1017 c7b9 56 41 4c 55 45 20  VALASC FCB $56,$41,$4C,$55,$45,$20,$04
+     04
+1018                         ;
+1019                         ;   COMMAND JUMP TABLE
+1020                         ;
+1021 c7c0 4d                 FUTABL	FCC "M"
+1022 c7c1 c2 6f              		FDB MOVE
+1023 c7c3 45                 		FCC "E"
+1024 c7c4 c0 a1              		FDB CHANGE
+1025 c7c6 47                 		FCC "G"
+1026 c7c7 c1 18              		FDB CONTG
+1027 c7c9 52                 		FCC "R"
+1028 c7ca c1 51              		FDB PRINT
+1029 c7cc 54                 		FCC "T"
+1030 c7cd c2 cf              		FDB TRACE
+1031 c7cf 40                 		FCC "@"
+1032 c7d0 c2 21              		FDB ASCII
+1033 c7d2 48                 		FCC "H"
+1034 c7d3 c1 d3              		FDB PRNTON
+1035 c7d5 56                 		FCC "V"
+1036 c7d6 c5 df              		FDB VIEW
+1037 c7d8 49                 		FCC "I"
+1038 c7d9 c2 34              		FDB IFILL
+1039 c7db 4a                 		FCC "J"
+1040 c7dc c2 17              		FDB JUMP
+1041 c7de 46                 		FCC "F"
+1042 c7df c2 94              		FDB FIND
+1043 c7e1 51                 		FCC "Q"
+1044 c7e2 80 20              		FDB $8020
+1045 c7e4 44                 		FCC "D"
+1046 c7e5 c2 ca              		FDB DISSA
+1047 c7e7 4b                 		FCC "K"
+1048 c7e8 c2 e1              		FDB KONTIN
+1049 c7ea 31                 		FCC "1"
+1050 c7eb c1 04              		FDB BKPNT
+1051 c7ed 32                 		FCC "2"
+1052 c7ee c0 f3              		FDB BKPNT2
+1053 c7f0 26                 		FCC "&"
+1054 c7f1 c8 2b              		FDB SLOAD	;new for V2 was FDB $7283
+1055 c7f3 2a                 		FCC "*"
+1056 c7f4 f8 00              		FDB $F800	
+1057 c7f6 4f                 		FCC "O"
+1058 c7f7 c1 d2              		FDB ECHON
+1059 c7f9 4e                 		FCC "N"
+1060 c7fa c1 d4              		FDB ECHOFF
+1061 c7fc                    TBLEND	EQU *		 
+1062                         ;
+1063                         ;	ADDED TO VERSION 2:
+1064                         ; 	MOTOROLA "S" LOADER PROGRAMME "S1" STARTS LOAD
+1065                         ; 	END OF LOAD "S9" RUN START END PLUS ADDRESS
+1066                         ;
+1067                         ; 	"S" LOADER PROGRAMME START
+1068                         ;
+1069 c7fc 54 68 69 73 20 53  S1STRING	FCC	"This S1 load has entered system scratch area"
+     31 20 6c 6f 61 64
+     20 68 61 73 20 65
+     6e 74 65 72 65 64
+     20 73 79 73 74 65
+     6d 20 73 63 72 61
+     74 63 68 20 61 72
+     65 61
+1070 c828 0d 0a 04           		FCB	$0D,$0A,$04
+1071                         ;
+1072 c82b                    SLOAD		EQU 	*
+1073 c82b 36                 		PSHA			; Save A register
+1074 c82c ff 7f 6f           		STX	TEMPX1		; Save X register
+1075 c82f 8d 46              GOAGAIN	BSR	GETCHAR	; Get first character from ACIA  
+1076 c831 81 53              		CMPA	#$53		; Is it "S"
+1077 c833 26 fa              		BNE	GOAGAIN	; If not go read again
+1078 c835 8d 40              		BSR	GETCHAR	; Get second character in frame
+1079 c837 81 39              		CMPA 	#$39		; Is it "9"
+1080 c839 27 35              		BEQ	RECOVER	; If "9" go and end read
+1081 c83b 81 31              		CMPA 	#$31		; Is it a "1"
+1082 c83d 26 f0              		BNE	GOAGAIN	; If no then go start again
+1083 c83f 7f 7f 74           		CLR	TEMPA		; Clear Frame length
+1084 c842 8d 50              		BSR	GETHEX		; Get frame length from input stream
+1085 c844 80 02              		SUBA	#$02		; Subtract the checksum
+1086 c846 b7 7f 73           		STAA	BYTESTORE	; Save frame length
+1087 c849 8d 3a              		BSR	GETADD		; Read next two bytes for dest address
+1088 c84b 8d 47              GETCOUNT	BSR	GETHEX		; Get the byte number
+1089 c84d 7a 7f 73           		DEC	BYTESTORE	; decrement counter
+1090 c850 27 15              		BEQ	INCOUNT	; If zero go to increment byte count
+1091 c852 a7 00              		STAA	0,X		; Store read byte into memory
+1092 c854 a1 00              		CMPA	0,X		; Test if RAM OK
+1093 c856 26 14              		BNE	QUESTION	; If write failed send Question and abort
+1094 c858 08                 		INX			; Increment address pointer
+1095                         		; bad instruction CMPX	VAR		; Is it the system scratch area
+1096 c859 8c 7f 00                   CPX	#VAR		; Is it the system scratch area
+1097 c85c 2e 02              		BGT	S1EXIT		; Abort if close to system scratch
+1098 c85e 20 eb              		BRA	GETCOUNT	; go get another byte
+1099                         ;
+1100 c860 ce c7 fc           S1EXIT	LDX	#S1STRING		; Protect System Scratch Abort S1
+1101 c863 8d 67              		BSR	OUTSTR		; Print abort string
+1102 c865 20 09              		BRA	RECOVER	; Back to console prompt
+1103                         ;
+1104 c867 7c 7f 74           INCOUNT	INC	TEMPA		; Increment tempa 
+1105 c86a 27 c3              		BEQ	GOAGAIN	; If zero go for another frame
+1106 c86c 86 3f              QUESTION	LDAA	#$3F		; Load question mark
+1107 c86e 8d 4f              		BSR	OUTPUTA	; Send to console
+1108 c870 fe 7f 6f           RECOVER	LDX	TEMPX1		; Restore "X"
+1109 c873 32                 		PULA			; Restore A
+1110 c874 7e c0 1f           		JMP	CONTRL		; Jump to exit
+1111                         ; 
+1112 c877 37                 GETCHAR	PSHB
+1113 c878 f6 80 18           WAITIN	LDAB ACIACS			; LOAD ACIA CONTROL REGISTER
+1114 c87b 57                 		ASRB			; SHIFT RIGHT  ACIADA
+1115 c87c 24 fa              		BCC 	WAITIN		; IF CARRY NOT SET THEN AGAIN
+1116 c87e b6 80 19           		LDAA 	ACIADA		; LOAD DATA REGISTER
+1117 c881 33                 		PULB			; RESTORE B REGISTER
+1118 c882 8d 3b              		BSR 	OUTPUTA	; ECHO INPUT
+1119 c884 39                 		RTS
+1120                         ;
+1121 c885 bd c8 94           GETADD	JSR	GETHEX	; Read in byte
+1122 c888 b7 7f 71           		STAA	ADDRESS	; store in first part of address
+1123 c88b 8d 07              		BSR	GETHEX		; Get another byte of data
+1124 c88d b7 7f 72           		STAA	ADDRESS1	; store in second address register
+1125 c890 fe 7f 71           		LDX	ADDRESS	; Load X register both bytes of address
+1126 c893 39                 		RTS			; Return from sub routine
+1127                         ;
+1128                         ;	ADD IN THE ADDRESS OFFSET
+1129                         ;
+1130 c894 8d 10              GETHEX	BSR	CONVHEX		; Go get byte of data and convert to binary 
+1131 c896 48                 		ASLA			; Shift the the 4 bits into msb
+1132 c897 48                 		ASLA			; Shift the the 4 bits into msb	
+1133 c898 48                 		ASLA			; Shift the the 4 bits into msb	
+1134 c899 48                 		ASLA			; Shift the the 4 bits into msb	
+1135 c89a 16                 		TAB			; Transfer "A" to "B"
+1136 c89b 8d 09              		BSR	CONVHEX	; Go get byte of data and convert to binary
+1137 c89d 1b                 		ABA			; Add 4 bits in "A" and "B" into "B"
+1138 c89e 16                 		TAB			; Transfer "A" to "B"
+1139 c89f fb 7f 74           		ADDB	TEMPA		; Add into checksum
+1140 c8a2 f7 7f 74           		STAB	TEMPA		; Add into checksum
+1141 c8a5 39                 		RTS			; Return from sub routine
+1142                         ; 	
+1143 c8a6 8d cf              CONVHEX	BSR	GETCHAR	; Get HEX character from ACIA
+1144 c8a8 80 30              		SUBA	#$30		; Convert to binary
+1145 c8aa 2b c0              		BMI	QUESTION	; Convert to binary
+1146 c8ac 81 09              		CMPA	#$09		; Convert to binary
+1147 c8ae 2f 0a              		BLE	RETURN2	; Convert to binary
+1148 c8b0 81 11              		CMPA	#$11		; Convert to binary
+1149 c8b2 2b 07              		BMI	INCSTACK	; Convert to binary
+1150 c8b4 81 16              		CMPA	#$16		; Convert to binary
+1151 c8b6 2e 03              		BGT	INCSTACK	; Convert to binary
+1152 c8b8 80 07              		SUBA	#$07		; Convert to binary
+1153 c8ba 39                 RETURN2	RTS			; Return from sub routine
+1154                         ;  
+1155 c8bb 31                 INCSTACK	INS			; Restore stack position
+1156 c8bc 31                 		INS			; Restore stack position
+1157 c8bd 20 ad              		BRA	QUESTION	; Go send ? and exit
+1158                         ;
+1159 c8bf 37                 OUTPUTA	PSHB			; SAVE B
+1160 c8c0 f6 80 18           WAITOUT	LDAB ACIACS		; LOAD ACIA CONTROL REGISTER
+1161 c8c3 57                 		ASRB			; SHIFT RIGHT
+1162 c8c4 57                 		ASRB			; SHIFT RIGHT
+1163 c8c5 24 f9              		BCC 	WAITOUT	; IF CARRY NOT SET DO AGAIN
+1164 c8c7 b7 80 19           		STAA ACIADA		; SEND CHARACTOR TO ACIA
+1165 c8ca 33                 		PULB			; RESTORE B
+1166 c8cb 39                 		RTS			; RETURN FROM ROUTINE
+1167                         ;
+1168 c8cc a6 00              OUTSTR	LDAA	0,X			; Read String
+1169 c8ce 81 04              		CMPA	#$4		; Is it EOT?
+1170 c8d0 27 05              		BEQ	STEXIT		; Exit if EOT
+1171 c8d2 8d eb              		BSR	OUTPUTA	; Print Character
+1172 c8d4 08                 		INX			; Point at next character
+1173 c8d5 20 f5              		BRA	OUTSTR		; Loop and read next
+1174 c8d7 39                 STEXIT		RTS			;
+1175                         ;
+1176                         ;END of V2 S-loader 
+1177                         ; 
+1178                         ;   STARTUP VECTORS $FFF8 -$FFFF
+1179                         ;
+1180 fff8                    		ORG $FFF8
+1181                         ;
+1182 fff8 c0 55              		FDB IO
+1183 fffa c0 5f              		FDB SWI
+1184 fffc c0 5a              		FDB POWDWN
+1185 fffe c0 00              		FDB START
+1186                         ;
+1187                         ; Version 1 has table of RAM locations at $A000H
+1188                         .
+1189                                     END
+1190                         ;
+.          10000
+ACIACS     8018
+ACIADA     8019
+ACIAT      7f0c
+ADASC      c78c
+ADDR       c261
+ADDRESS    7f71
+ADDRESS1   7f72
+AREG       c775
+ASC01      c224
+ASC02      c225
+ASCII      c221
+BAD2       c246
+BADDR      c06a
+BEGA       7f04
+BFLAG      7f4f
+BITE2      7f52
+BITE3      7f53
+BKFLG      7f16
+BKFLG2     7f6d
+BKPNT      c104
+BKPNT2     c0f3
+BLANK      c75f
+BMC1       c27a
+BPOINT     7f6a
+BREG       c771
+BUFFER     7f00
+BYT1       c3c5
+BYT2       c3a3
+BYT21      c3a6
+BYT22      c3c2
+BYT3       c388
+BYT31      c395
+BYTE       c078
+BYTECT     7f67
+BYTESTORE  7f73
+C1         c068
+C2         c1cd
+CHA51      c0a3
+CHANGE     c0a1
+CHM1       c0c0
+CKCBA      c441
+CKROM      c4fc
+CLEAR      c2fc
+COMMX      c75c
+CONTG      c118
+CONTRL     c01f
+CONVHEX    c8a6
+CR8        c1ed
+CR9        c291
+CRLF       c2c4
+CRLFAS     c788
+CSET       c782
+DISIN      c2ef
+DISPLY     c14e
+DISS       c2ec
+DISSA      c2ca
+DOT        c475
+DOT1       c47d
+DPOS       c3d7
+DSOOP      c160
+DSOOP1     c167
+ECHO       7f0d
+ECHOFF     c1d4
+ECHON      c1d2
+ENDA       7f06
+ENDADD     c24b
+EXEC       c4e8
+EXR        c4dd
+FIND       c294
+FROMAD     c796
+FUTABL     c7c0
+GETADD     c885
+GETCHAR    c877
+GETCOUNT   c84b
+GETHEX     c894
+GOAGAIN    c82f
+GOODCH     c051
+IFILL      c234
+IFILL1     c244
+IFILL2     c23c
+IMLR1      c51c
+IMLR10     c58c
+IMLR11     c597
+IMLR12     c5a5
+IMLR13     c5ad
+IMLR2      c532
+IMLR3      c537
+IMLR4      c53c
+IMLR5      c53f
+IMLR6      c542
+IMLR7      c54a
+IMLR8      c54d
+IMLR9      c56a
+IMM        c34a
+IN1        c1f5
+IN1HG      c0e1
+INCH       c094
+INCOUNT    c867
+INCSTACK   c8bb
+INEEE      c1f3
+INHEX      c0cd
+IO         c055
+IOV        7f02
+ISJ        c4b0
+ISX        c352
+ISXD       c4b8
+JUMP       c217
+KONTIN     c2e1
+LIMITS     c254
+LOAD19     c064
+MCL        c76b
+MCONT      7f6e
+MFLAG      7f50
+MOVE       c26f
+NEXT       c334
+NIO        7f08
+NONO       c4f9
+NOT1       c436
+NOTB       c37e
+NOTBB      c3e9
+NOTJ       c4cc
+NOTJ1      c4d3
+NOTRTI     c4e0
+NOTRTS     c4d7
+NXTCHR     c042
+OKOP       c328
+OPSAVE     7f63
+OUT2H      c0e2
+OUT2HS     c0ed
+OUT4HS     c0eb
+OUTA       c5dc
+OUTCH      c091
+OUTEEE     c20a
+OUTEEE1    c20b
+OUTHL      c083
+OUTHR      c087
+OUTPUTA    c8bf
+OUTS       c0ef
+OUTSTR     c8cc
+OUTXHI     c11c
+PAVOI2     c407
+PAVOI3     c40b
+PAVOI4     c423
+PAVOI5     c42d
+PAVOI8     c41b
+PAVOI9     c42f
+PB1        7f64
+PB2        7f65
+PB3        7f66
+PC1        7f68
+PC2        7f69
+PCTR       c77e
+PDAT       c1cf
+PDATA1     c09a
+PDATA2     c097
+PIAD1A     8000
+PIAD1B     8002
+PIAD2A     8008
+PIAD2B     800a
+PIAS1A     8001
+PIAS1B     8003
+PIAS2A     8009
+PIAS2B     800b
+PNT3C      c5b0
+PNTA       c763
+PNTB       c767
+PNTBYT     c2bb
+PNTS       c1aa
+POWDWN     c05a
+PRINT      c151
+PRINTR     7f4c
+PRINTS     c1d9
+PRNTON     c1d3
+PRTS       c1ea
+PUT        c35e
+PUT1       c361
+QUESTION   c86c
+RDC        c465
+RDX        c45f
+RECOVER    c870
+RETNOT     c472
+RETURN     c2e4
+RETURN2    c8ba
+S1EXIT     c860
+S1STRING   c7fc
+SAV        c1ef
+SFE        c125
+SKIP       c2b2
+SLOAD      c82b
+SMC1       c29d
+SMC2       c2ab
+SP         7f0a
+SPLBD0     c759
+SREG       c77b
+STACK      7f44
+START      c000
+STEXIT     c8d7
+SWI        c05f
+SWIPTR     7f17
+TBL        c633
+TBLEND     c7fc
+TBLKUP     c518
+TEMP       7f10
+TEMPA      7f74
+TEMPX1     7f6f
+TFLAG      7f13
+THRUAD     c7a3
+TOADD      c7b0
+TRACE      c2cf
+TSTACK     7f62
+TSTB       c48f
+TSTJ       c4a0
+TW         7f11
+VALASC     c7b9
+VALUE      c266
+VAR        7f00
+VCOM1      c5e2
+VCOM10     c5fc
+VCOM2      c60b
+VCOM3      c615
+VCOM4      c617
+VCOM5      c5e7
+VCOM9      c5ef
+VIEW       c5df
+WAITIN     c878
+WAITOUT    c8c0
+XBK        c0cb
+XFLAG      7f51
+XHI        7f0e
+XLOW       7f0f
+XREG       c778
+XTEMP      7f14
