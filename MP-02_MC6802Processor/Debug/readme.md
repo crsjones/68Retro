@@ -2,7 +2,7 @@
 
 A collection of simple ROMs to help solve hardware problems.
 
-Each ROM is 8k, for a AT28C64 EEPROM or you paste the object code into the top of any size ROM.
+Each ROM is 8k, for a AT28C64 EEPROM or you can paste the object code into the top of any size ROM.
 
 ### HCF 
 
