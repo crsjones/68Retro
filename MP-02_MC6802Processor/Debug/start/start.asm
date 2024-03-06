@@ -1,0 +1,19 @@
+;
+; GOTTA START SOMEWHERE
+;
+        ORG  $FFF0
+;
+; READ FROM I/O ADDRESS
+;
+START   LDAA $E000
+        BRA  START
+;
+;VECTORS
+;
+        ORG  $FFF8
+
+IRQA    FDB  START
+SWI     FDB  START
+NMI     FDB  START
+RESET   FDB  START
+        END

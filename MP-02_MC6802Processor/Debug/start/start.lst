@@ -1,0 +1,25 @@
+output:  start.s19
+0001                         ;
+0002                         ; GOTTA START SOMEWHERE
+0003                         ;
+0004 fff0                            ORG  $FFF0
+0005                         ;
+0006                         ; READ FROM I/O ADDRESS
+0007                         ;
+0008 fff0 b6 e0 00           START   LDAA $E000
+0009 fff3 20 fb                      BRA  START
+0010                         ;
+0011                         ;VECTORS
+0012                         ;
+0013 fff8                            ORG  $FFF8
+0014                         
+0015 fff8 ff f0              IRQA    FDB  START
+0016 fffa ff f0              SWI     FDB  START
+0017 fffc ff f0              NMI     FDB  START
+0018 fffe ff f0              RESET   FDB  START
+0019                                 END
+IRQA       fff8
+NMI        fffc
+RESET      fffe
+START      fff0
+SWI        fffa

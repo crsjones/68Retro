@@ -1,0 +1,44 @@
+output:  acia-rl.s19
+0001                         ;
+0002                         ; ACIA REMOTE LOOPBACK
+0003                         ;
+0004 ffd0                            ORG  $FFD0
+0005                         ;
+0006                         ; INITIALIZE THE ACIA
+0007                         ; 
+0008 ffd0 86 03              START   LDAA #$03
+0009 ffd2 b7 e0 00                   STAA $E000      ;MASTER RESET THE ACIA
+0010 ffd5 01                         NOP
+0011 ffd6 01                         NOP
+0012                         ; INITIALIZE THE ACIA FOR:
+0013                         ; RX INTERRUPT DISABLED
+0014                         ; RTS LOW TRANSMIT INTERRUPT DISABLED
+0015                         ; 8 BITS, ONE STOP BIT, /16 BAUD CLOCK
+0016                         ;
+0017 ffd7 86 15                      LDAA #$15
+0018 ffd9 b7 e0 00                   STAA $E000       ;WRITE THE CONTROL REGISTER
+0019                         ;
+0020 ffdc b6 e0 00           LOOP    LDAA $E000       ;READ THE STATUS REGISTER
+0021 ffdf 85 01                      BITA #$01        ;RDR FULL?
+0022 ffe1 27 f9                      BEQ  LOOP
+0023 ffe3 85 02                      BITA #$02        ;TDR EMPTY?
+0024 ffe5 27 f5                      BEQ  LOOP
+0025 ffe7 b6 e0 01                   LDAA $E001       ;READ THE RECEIVE DATA REGISTER
+0026 ffea b7 e0 01                   STAA $E001       ;WRITE THE TRANSMIT DATA REGISTER
+0027 ffed 20 ed                      BRA  LOOP
+0028                         ;
+0029                         ;VECTORS
+0030                         ;
+0031 fff8                            ORG  $FFF8
+0032                         
+0033 fff8 ff d0              IRQA    FDB  START
+0034 fffa ff d0              SWI     FDB  START
+0035 fffc ff d0              NMI     FDB  START
+0036 fffe ff d0              RESET   FDB  START
+0037                                 END
+IRQA       fff8
+LOOP       ffdc
+NMI        fffc
+RESET      fffe
+START      ffd0
+SWI        fffa

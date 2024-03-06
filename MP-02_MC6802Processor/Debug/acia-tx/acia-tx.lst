@@ -1,0 +1,42 @@
+output:  acia-tx.s19
+0001                         ;
+0002                         ; ACIA TRANSMIT
+0003                         ;
+0004 ffd0                            ORG  $FFD0
+0005                         ;
+0006                         ; INITIALIZE THE ACIA
+0007                         ; 
+0008 ffd0 86 03              START   LDAA #$03
+0009 ffd2 b7 e0 00                   STAA $E000      ;MASTER RESET THE ACIA
+0010 ffd5 01                         NOP
+0011 ffd6 01                         NOP
+0012                         ; INITIALIZE THE ACIA FOR:
+0013                         ; RX INTERRUPT DISABLED
+0014                         ; RTS LOW TRANSMIT INTERRUPT DISABLED
+0015                         ; 8 BITS, ONE STOP BIT, /16 BAUD CLOCK
+0016                         ;
+0017 ffd7 86 15                      LDAA #$15
+0018 ffd9 b7 e0 00                   STAA $E000       ;WRITE THE CONTROL REGISTER
+0019                         ;
+0020 ffdc b6 e0 00           LOOP    LDAA $E000       ;READ THE CONTROL REGISTER
+0021 ffdf 84 02                      ANDA #$02        ;TDRE EMPTY?
+0022 ffe1 27 f9                      BEQ  LOOP
+0023 ffe3 86 55                      LDAA #$55        ; ASCII 'U'
+0024 ffe5 b7 e0 01                   STAA $E001       ;SEND THE CHAR
+0025 ffe8 20 f2                      BRA  LOOP
+0026                         ;
+0027                         ;VECTORS
+0028                         ;
+0029 fff8                            ORG  $FFF8
+0030                         
+0031 fff8 ff d0              IRQA    FDB  START
+0032 fffa ff d0              SWI     FDB  START
+0033 fffc ff d0              NMI     FDB  START
+0034 fffe ff d0              RESET   FDB  START
+0035                                 END
+IRQA       fff8
+LOOP       ffdc
+NMI        fffc
+RESET      fffe
+START      ffd0
+SWI        fffa

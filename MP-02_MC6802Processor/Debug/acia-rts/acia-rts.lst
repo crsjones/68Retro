@@ -1,0 +1,45 @@
+output:  acia-rts.s19
+0001                         ;
+0002                         ; ACIA TOGGLE RTS
+0003                         ;
+0004 ffd0                            ORG  $FFD0
+0005                         ;
+0006                         ; INITIALIZE THE ACIA
+0007                         ; 
+0008 ffd0 86 03              START   LDAA #$03
+0009 ffd2 b7 e0 00                   STAA $E000      ;MASTER RESET THE ACIA
+0010 ffd5 01                         NOP
+0011 ffd6 01                         NOP
+0012                         ; INITIALIZE THE ACIA FOR:
+0013                         ; RX INTERRUPT DISABLED
+0014                         ; RTS LOW TRANSMIT INTERRUPT DISABLED
+0015                         ; 8 BITS, ONE STOP BIT, /16 BAUD CLOCK
+0016                         ;
+0017 ffd7 5f                         CLRB
+0018 ffd8 86 15              LOOP    LDAA #$15
+0019 ffda b7 e0 00                   STAA $E000      ;MAKE RTS LOW
+0020 ffdd 5a                 DELAY   DECB
+0021 ffde 26 fd                      BNE  DELAY
+0022 ffe0 86 55                      LDAA #$55
+0023 ffe2 b7 e0 00                   STAA $E000      ;MAKE RTS HIGH
+0024 ffe5 5a                 DELAY1  DECB
+0025 ffe6 26 fd                      BNE  DELAY1
+0026 ffe8 20 ee                      BRA  LOOP
+0027                         ;
+0028                         ;VECTORS
+0029                         ;
+0030 fff8                            ORG  $FFF8
+0031                         
+0032 fff8 ff d0              IRQA    FDB  START
+0033 fffa ff d0              SWI     FDB  START
+0034 fffc ff d0              NMI     FDB  START
+0035 fffe ff d0              RESET   FDB  START
+0036                                 END
+DELAY      ffdd
+DELAY1     ffe5
+IRQA       fff8
+LOOP       ffd8
+NMI        fffc
+RESET      fffe
+START      ffd0
+SWI        fffa
