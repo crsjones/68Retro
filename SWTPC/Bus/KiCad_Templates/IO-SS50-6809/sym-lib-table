@@ -1,0 +1,4 @@
+(sym_lib_table
+  (version 0)
+  (lib (name "IO-SS50-6809-altium-import")(type "KiCad")(uri "${KIPRJMOD}/IO-SS50-6809-altium-import.kicad_sym")(options "")(descr ""))
+)

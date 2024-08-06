@@ -1,0 +1,21 @@
+----------------------------------------------------------------------------------------------------------------------------------
+NCDrill File Report For: MEK6800D2_01.PcbDoc   25/06/2024  7:47:45 PM
+----------------------------------------------------------------------------------------------------------------------------------
+
+Layer Pair : Top Layer to Bottom Layer
+ASCII RoundHoles File : MEK6800D2_01-RoundHoles.TXT
+ASCII SlotHoles File : MEK6800D2_01-SlotHoles.TXT
+
+Tool       Hole Size               Hole Tolerance               Hole Type       Hole Count   Plated         Tool Travel
+----------------------------------------------------------------------------------------------------------------------------------
+T1      24mil (0.6mm)                                             Round             13        PTH        10.34inch (262.68mm)
+T2      28mil (0.7mm)                                             Round             122       PTH        15.34inch (389.58mm)
+T3      32mil (0.8mm)                                             Round             97        PTH        27.05inch (687.18mm)
+T4      35mil (0.9mm)                                             Round             12        PTH        2.83inch (71.95mm)
+T5      39mil (1mm)                                               Round             100       PTH        14.95inch (379.73mm)
+T6      45mil (1.143mm)                                           Slot              3         PTH        1.40inch (35.51mm)
+T7      126mil (3.2mm)                                            Round             4         PTH        13.10inch (332.74mm)
+----------------------------------------------------------------------------------------------------------------------------------
+Totals                                                                              351
+
+Total Processing Time (hh:mm:ss) : 00:00:01
