@@ -1,0 +1,3082 @@
+                      ;Buggy machine language monitor and rudimentary O.S. version 1.0
+                      ;mon2.asm
+                      * Memory map of SBC
+                      * $0-$40 Zero page variables reserved by monitor and O.S.
+                      * $40-$FF Zero page portion for user programs.
+                      * $100-$17F Xmodem buffer 0, terminal input buffer,
+                      * $180-$1FF Xmodem buffer 1, terminal output buffer.
+                      * $200-$27F Terminal input line.
+                      * $280-$2FF Variables reserved by monitor and O.S.
+                      * $300-$400 System stack.
+                      * $400-$7FFF RAM for user programs and data.
+                      * $8000-$DFFF PROM for user programs.
+                      * $E000-$E1FF I/O addresses.
+                      * $E200-$E3FF Reserved.
+                      * $E400-$FFFF Monitor ROM
+0000                   SETDP 0
+                      * Reserved Zero page addresses
+0000                                  org $0000
+                      * First the I/O routine vectors.
+0000                  getchar         rmb 3           ;Jump to getchar routine.
+0003                  putchar         rmb 3           ;Jump to putchar routine.
+0006                  getline         rmb 3           ;Jump to getline routine.
+0009                  putline         rmb 3           ;Jump to putline routine.
+000C                  putcr           rmb 3           ;Jump to putcr routine.
+000F                  getpoll         rmb 3           ;Jump to getpoll routine.
+0012                  xopenin         rmb 3           ;Jump to xopenin routine.
+0015                  xopenout        rmb 3           ;Jump to xopenout routine.
+0018                  xabortin        rmb 3           ;Jump to xabortin routine.
+001B                  xclosein        rmb 3           ;Jump to xclosein routine.
+001E                  xcloseout       rmb 3           ;Jump to xcloseout routine.
+0021                  delay           rmb 3           ;Jump to delay routine.
+                      
+                      *Next the system variables in the zero page.
+0024                  temp            rmb 2            ;hex scanning/disasm
+0026                  temp2           rmb 2            ;Hex scanning/disasm
+0028                  temp3           rmb 2            ;Used in Srecords, H command
+002A                  timer           rmb 3            ;3 byte timer, incremented every 20ms
+002D                  xpacknum        rmb 1            ;Packet number for XMODEM block,
+002E                  xsum            rmb 1            ;XMODEM checksum
+002F                  lastok          rmb 1            ;flag to indicate last block was OK
+0030                  xcount          rmb 1            ;Count of characters in buffer.
+0031                  xmode           rmb 1            ;XMODEM mode, 0 none, 1 out, 2 in.
+0032                  disflg          rmb 1
+                      
+                      * I/O buffers.
+0080                  buflen          equ 128         ;Length of input line buffer.
+0100                                  org $100
+0100                  buf0            rmb 128         ;Xmodem buffer 0, serial input buffer.
+0180                  buf1            rmb 128         ;Xmodem buffer 1, serial output buffer.
+0200                  linebuf         rmb buflen      ;Input line buffer.
+                      
+                      
+                      * Interrupt vectors (start at $280)
+                      * All interrupts except RESET are vectored through jumps.
+                      * FIRQ is timer interrupt, IRQ is ACIA interrupt.
+0280                  swi3vec         rmb 3
+0283                  swi2vec         rmb 3
+0286                  firqvec         rmb 3
+0289                  irqvec          rmb 3
+028C                  swivec          rmb 3
+028F                  nmivec          rmb 3
+0292                  xerrvec         rmb 3           ;Error handler for XMODEM error.
+0295                  exprvec         rmb 3           ;Expression evaluator in assembler.
+0298                  asmerrvec       rmb 3           ;Error handler for assembler errors.
+029B                  pseudovec       rmb 3           ;Vector for asm pseudo instructions.
+                      
+                      * Next the non zero page system variables.
+029E                  oldpc           rmb 2           ;Saved pc value for J command.
+02A0                  addr            rmb 2           ;Address parameter.
+02A2                  length          rmb 2           ;Length parameter.
+                      
+0008                  brkpoints       equ 8           ;Number of settable breakpoints. 
+02A4                  bpaddr          rmb brkpoints*3 ;Address and byte for each break point.
+02BC                  stepbp          rmb 3           ;Address of P command break point.
+                      
+02BF                  sorg            rmb 2           ;Origin address of S record entry.
+02C1                  soffs           rmb 2           ;Offset load adrr-addr in record
+                      
+02C3                  oldgetc         rmb 2           ;Old getchar address.
+02C5                  oldputc         rmb 2           ;Old putchar address.
+02C7                  oldputcr        rmb 2           ;Old putcr address.
+02C9                  lastterm        rmb 1           ;Last terminating character.
+02CA                  filler          rmb 1           ;Filler at end of XMODEM file.
+02CB                  xmcr            rmb 1           ;end-of-line characters for XMODEM send.
+02CC                  savesp          rmb 2           ;Save sp to restore it on error.
+02CE                  nxtadd          rmb 2
+                      
+                      * Following variables are used by assembler/disassembler.
+02D0                  prebyte         rmb 1
+02D1                  opc1            rmb 1
+02D2                  opcode          rmb 1
+02D3                  postbyte        rmb 1
+02D4                  amode           rmb 1
+02D5                  operand         rmb 2           
+02D7                  mnembuf         rmb 5           ;Buffer to store capitalized mnemonic.
+02DC                  opsize          rmb 1           ;SIze (in bytes) of extra oeprand (0--2)
+02DD                  uncert          rmb 1           ;Flag to indicate that op is unknown.
+02DE                  dpsetting       rmb 2
+                      
+02E0                  endvars         equ *
+                      
+0400                  ramstart        equ $400        ;first free RAM address.
+                      
+8000                  ramtop  equ $8000       ;top of RAM.
+                      
+                      * I/O port addresses
+E000                  aciactl         equ $e000       ;Control port of ACIA
+E000                  aciasta         equ $e000       ;Status port of ACIA
+E001                  aciadat         equ $e001       ;Data port of ACIA
+                      
+                      * ASCII control characters.
+0001                  SOH             equ 1
+0004                  EOT             equ 4
+0006                  ACK             equ 6
+0008                  BS              equ 8
+0009                  TAB             equ 9
+000A                  LF              equ 10
+000D                  CR              equ 13
+0015                  NAK             equ 21
+0018                  CAN             equ 24
+007F                  DEL             equ 127
+                      
+00DF                  CASEMASK        equ $DF         ;Mask to make lowercase into uppercase.
+                      
+                      * Monitor ROM starts here.
+E400                                  org $E400
+                      
+E400  1AFF            reset   orcc #$FF       ;Disable interrupts.
+E402  4F                              clra
+E403  1F8B                            tfr a,dp        ;Set direct page register to 0.
+E405  0F32                            clr disflg
+E407  10CE0400                        lds #ramstart
+E40B  8EE525                          ldx #intvectbl
+E40E  CE0280                          ldu #swi3vec
+E411  C61E                            ldb #osvectbl-intvectbl
+E413  8D37                            bsr blockmove   ;Initialize interrupt vectors from ROM.
+E415  8EE543                          ldx #osvectbl
+E418  CE0000                          ldu #0
+E41B  C624                            ldb #endvecs-osvectbl
+E41D  8D2D                            bsr blockmove   ;Initialize I/O vectors from ROM.
+E41F  8D33                            bsr initacia    ;Initialize serial port.
+E421  1C00                            andcc #$0       ;Enable interrupts
+                      * Put the 'saved' registers of the program being monitored on top of the
+                      * stack. There are 12 bytes on the stack for cc,b,a,dp,x,y,u and pc
+                      * pc is initialized to $400, the rest to zero.
+E423  8E0000                          ldx #0
+E426  1F12                            tfr x,y
+E428  CE0400                          ldu #ramstart
+E42B  3450                            pshs x,u
+E42D  3430                            pshs x,y
+E42F  3430                            pshs x,y  
+E431  8E029E                          ldx #oldpc
+E434  C642                            ldb #endvars-oldpc
+E436  6F80            clvar   clr ,x+
+E438  5A                              decb
+E439  26FB                            bne clvar       ;Clear the variable area.
+E43B  CC1A03                          ldd #$1A03
+E43E  FD02CA                          std filler      ;Set XMODEM filler and end-of-line.
+E441  8EE85E                          ldx #welcome
+E444  BDE507                          jsr outcount
+E447  9D0C                            jsr putcr       ;Print a welcome message.
+E449  7EE581                          jmp cmdline
+                      * Block move routine, from X to U length B. Modifies them all and A. 
+E44C  A680            blockmove       lda ,x+
+E44E  A7C0                            sta ,u+
+E450  5A                              decb
+E451  26F9                            bne blockmove
+E453  39                              rts
+                      
+                      * Initialize serial communications port, buffers, interrupts.
+E454  C603            initacia        ldb #$03     ;reset ACIA
+E456  F7E000                          stb aciactl
+E459  C615                            ldb #%00010101   ;tx interrupts disabled
+E45B  F7E000                          stb aciactl      ;set ACIA control register
+E45E  39                              rts
+                      
+                      * O.S. routine to read a character into B register.
+E45F  F6E000          osgetc          ldb aciasta
+E462  C501                            bitb #$01
+E464  27F9                            beq osgetc
+E466  F6E001                          ldb aciadat
+E469  39                              rts
+                      
+                      ;O.S. routine to check if there is a character ready to be read.
+E46A  F6E000          osgetpoll       ldb aciasta
+E46D  C501                            bitb #$01
+E46F  2602                            bne poltrue
+E471  5F                              clrb
+E472  39                              rts
+E473  C6FF            poltrue         ldb #$ff
+E475  39                              rts
+                      
+                      * O.S. routine to write the character in the B register.
+E476  3402            osputc          pshs a
+E478  B6E000          putcloop        lda aciasta
+E47B  8502                            bita #$02
+E47D  27F9                            beq putcloop
+E47F  F7E001                          stb aciadat
+E482  3502                            puls a
+E484  39                              rts
+                      
+                      * O.S. routine to read a line into memory at address X, at most B chars
+                      * long, return actual length in B. Permit backspace editing.
+E485  3412            osgetl          pshs a,x
+E487  D724                            stb temp
+E489  4F                              clra
+E48A  9D00            osgetl1         jsr getchar
+E48C  C47F                            andb #$7F
+E48E  C108                            cmpb #BS
+E490  2704                            beq backsp
+E492  C17F                            cmpb #DEL
+E494  2614                            bne osgetl2
+E496  4D              backsp          tsta                  ;Recognize BS and DEL as backspace key.
+E497  27F1                            beq osgetl1           ;ignore if line already zero length.
+E499  C608                            ldb #BS
+E49B  9D03                            jsr putchar
+E49D  C620                            ldb #' '
+E49F  9D03                            jsr putchar
+E4A1  C608                            ldb #BS               ;Send BS,space,BS. This erases last
+E4A3  9D03                            jsr putchar           ;character on most terminals.
+E4A5  301F                            leax -1,x             ;Decrement address.
+E4A7  4A                              deca
+E4A8  20E0                            bra osgetl1
+E4AA  C10D            osgetl2         cmpb #CR
+E4AC  270D                            beq newline
+E4AE  C10A                            cmpb #LF
+E4B0  2613                            bne osgetl3           ;CR or LF character ends line.
+E4B2  F602C9                          ldb lastterm
+E4B5  C10D                            cmpb #CR
+E4B7  27D1                            beq osgetl1           ;Ignore LF if it comes after CR
+E4B9  C60A                            ldb #LF               
+E4BB  F702C9          newline         stb lastterm
+E4BE  9D0C                            jsr putcr             
+E4C0  1F89                            tfr a,b               ;Move length to B
+E4C2  3512                            puls a,x              ;restore registers.
+E4C4  39                              rts                   ;<--- Here is the exit point.
+E4C5  C109            osgetl3         cmpb #TAB
+E4C7  270F                            beq dotab
+E4C9  C120                            cmpb #' '
+E4CB  25BD                            blo osgetl1           ;Ignore control characters.
+E4CD  9124                            cmpa temp
+E4CF  27B9                            beq osgetl1           ;Ignore char if line full.
+E4D1  9D03                            jsr putchar           ;Echo the character.
+E4D3  E780                            stb ,x+               ;Store it in memory.
+E4D5  4C                              inca
+E4D6  20B2                            bra osgetl1
+E4D8  C620            dotab           ldb #' '
+E4DA  9124                            cmpa temp
+E4DC  27AC                            beq osgetl1
+E4DE  9D03                            jsr putchar
+E4E0  E780                            stb ,x+
+E4E2  4C                              inca
+E4E3  8507                            bita #7                ;Insert spaces until length mod 8=0
+E4E5  26F1                            bne dotab
+E4E7  20A1                            bra osgetl1 
+                      
+                      * O.S. routine to write a line starting at address X, B chars long.
+E4E9  3416            osputl          pshs a,b,x
+E4EB  1F98                            tfr b,a
+E4ED  4D                              tsta
+E4EE  2707                            beq osputl1
+E4F0  E680            osputl2         ldb ,x+
+E4F2  9D03                            jsr putchar
+E4F4  4A                              deca
+E4F5  26F9                            bne osputl2
+E4F7  3516            osputl1         puls a,b,x
+E4F9  39                              rts
+                      
+                      * O.S. routine to terminate a line.
+E4FA  3404            oscr            pshs b
+E4FC  C60D                            ldb #CR
+E4FE  9D03                            jsr putchar
+E500  C60A                            ldb #LF
+E502  9D03                            jsr putchar     ;Send the CR and LF characters.
+E504  3504                            puls b
+E506  39                              rts
+                      
+                      * Output a counted string at addr X
+E507  3414            outcount        pshs x,b
+E509  E680                            ldb ,x+
+E50B  9D09                            jsr putline
+E50D  3514                            puls x,b
+E50F  39                              rts
+                      
+E510  0C2C            timerirq        inc timer+2
+E512  2608                            bne endirq
+E514  0C2B                            inc timer+1
+E516  2604                            bne endirq
+E518  0C2A                            inc timer
+E51A  3B                              rti
+E51B  12              aciairq         nop
+E51C  3B              endirq          rti
+                      
+                      * Wait D times 20ms.
+E51D  D32B            osdly           addd timer+1
+E51F  10932B          dlyloop         cmpd timer+1
+E522  26FB                            bne dlyloop
+E524  39                              rts             
+                      
+                      * This table will be copied to the interrupt vector area in RAM.
+E525  7EE51C          intvectbl       jmp endirq
+E528  7EE51C                          jmp endirq
+E52B  7EE510                          jmp timerirq
+E52E  7EE51B                          jmp aciairq
+E531  7EE572                          jmp unlaunch
+E534  7EE51C                          jmp endirq
+E537  7EF0E5                          jmp xerrhand
+E53A  7EF99A                          jmp expr
+E53D  7E0298                          jmp asmerrvec
+E540  7EFBC9                          jmp pseudo
+                      * And this one to the I/O vector table.
+E543  7EE45F          osvectbl        jmp osgetc
+E546  7EE476                          jmp osputc
+E549  7EE485                          jmp osgetl
+E54C  7EE4E9                          jmp osputl
+E54F  7EE4FA                          jmp oscr
+E552  7EE46A                          jmp osgetpoll
+E555  7EEFDE                          jmp xopin
+E558  7EF001                          jmp xopout
+E55B  7EF026                          jmp xabtin
+E55E  7EF069                          jmp xclsin
+E561  7EF046                          jmp xclsout
+E564  7EE51D                          jmp osdly
+E567                  endvecs         equ *
+                                      
+                      * The J command returns here.
+E567  3410            stakregs        pshs x               ;Stack something where the pc comes
+                      ;               pshs ccr,b,a,dp,x,y,u ;Stack the normal registers.
+E569  347F                            pshs cc,b,a,dp,x,y,u ;Stack the normal registers.
+                      
+E56B  BE029E                          ldx oldpc       
+E56E  AF6A                            stx 10,s             ;Stack the old pc value.
+E570  2007                            bra unlaunch1
+                      * The G and P commands return here through a breakpoint.
+                      * Registers are already stacked.
+E572  EC6A            unlaunch        ldd 10,s
+E574  830001                          subd #1
+E577  ED6A                            std 10,s             ;Decrement pc before breakpoint
+E579  1C00            unlaunch1       andcc #$0            ;reenable the interrupts.
+E57B  BDEC5A                          jsr disarm           ;Disarm the breakpoints.
+E57E  BDEBAF                          jsr dispregs         
+E581  9D1E            cmdline         jsr xcloseout
+E583  10FF02CC                        sts savesp
+E587  C62E                            ldb #'.'
+E589  9D03                            jsr putchar
+E58B  8E0200                          ldx #linebuf
+E58E  C680                            ldb #buflen
+E590  9D06                            jsr getline
+E592  5D                              tstb
+E593  27EC                            beq cmdline          ;Ignore line if it is empty
+E595  3A                              abx
+E596  6F84                            clr ,x               ;Make location after line zero.
+E598  8E0200                          ldx #linebuf
+E59B  E680                            ldb ,x+
+E59D  C4DF                            andb #CASEMASK       ;Make 1st char uppercase.
+E59F  C041                            subb #'A'            
+E5A1  253E                            bcs unk
+E5A3  C11A                            cmpb #26
+E5A5  243A                            bcc unk              ;Unknown cmd if it is not a letter.
+E5A7  8EE5AD                          ldx #cmdtab
+E5AA  58                              aslb                  ;Index into command table.
+E5AB  6E95                            jmp [b,x]
+                      
+E5AD  FF18EC90EAF0EA00 cmdtab          fdb asm,break,calc,dump
+E5B5  EA5AEE40EB24E5EE                 fdb enter,find,go,help
+E5BD  EADEEB33E5E1E5E1                 fdb inp,jump,unk,unk
+E5C5  EE03E5E1E5E1EB52                 fdb move,unk,unk,prog
+E5CD  E5E1EBF6ECFEEB5E                 fdb unk,regs,srec,trace
+E5D5  F93CE5E1E5E1F0EC                 fdb unasm,unk,unk,xmodem
+E5DD  E5E1E5E1                        fdb unk,unk
+                      
+                      * Unknown command handling routine.
+E5E1  9D18            unk             jsr xabortin
+E5E3  8EE87B                          ldx #unknown
+E5E6  BDE507                          jsr outcount
+E5E9  9D0C                            jsr putcr
+E5EB  7EE581                          jmp cmdline
+                      
+E5EE  8EE5FD          help            ldx #mhelp      ;Print a help message.
+E5F1  E680            help1           ldb ,x+
+E5F3  2705                            beq endhlp
+E5F5  17FE7E                          lbsr osputc
+E5F8  20F7                            bra help1               
+E5FA  7EE581          endhlp          jmp cmdline
+E5FD  0D0A            mhelp           fcb     CR,LF
+E5FF  436F6D6D616E6473206C697374                 fcc     "Commands list"
+E60C  0D0A                            fcb     CR,LF
+                      
+E60E  2D2D2D2D2D2D2D2D2D2D2D2D2D                 fcc     "-------------"
+E61B  0D0A                            fcb     CR,LF
+                      
+E61D  41736D20202020                  fcc     "Asm    "
+E624  7B41616464727D                  fcc     "{Aaddr}"
+E62B  0D0A                            fcb     CR,LF
+                      
+E62D  556E61736D2020                  fcc     "Unasm  "
+E634  7B55206F72205561646472206F722055616464722C6C656E6774687D                 fcc     "{U or Uaddr or Uaddr,length}"
+E650  0D0A                            fcb     CR,LF
+                      
+E652  44756D70202020                  fcc     "Dump   "
+E659  7B44206F7220443C616464723E206F7220443C616464723E2C3C6C656E6774683E7D                 fcc     "{D or D<addr> or D<addr>,<length>}"
+E67B  0D0A                            fcb     CR,LF
+                      
+E67D  456E7465722020                  fcc     "Enter  "
+E684  7B45206F7220453C616464723E206F7220453C616464723E203C62797465733E206F7220453C616464723E737472696E677D                 fcc     "{E or E<addr> or E<addr> <bytes> or E<addr>string}"
+E6B6  0D0A                            fcb     CR,LF
+                      
+E6B8  427265616B2020                  fcc     "Break  "
+E6BF  7B42206F7220423C616464723E2E204220646973706C6179732C20423C616464723E2073657473206F7220636C6561727320627265616B706F696E747D                 fcc     "{B or B<addr>. B displays, B<addr> sets or clears breakpoint}"
+E6FC  0D0A                            fcb     CR,LF
+                      
+E6FE  46696E64202020                  fcc     "Find   "
+E705  7B4661646472206279746573206F72204661646472226173636969227D                 fcb     "{Faddr bytes or Faddr",34,"ascii",34,"}"
+E722  0D0A                            fcb     CR,LF
+                      
+E724  476F2020202020                  fcc     "Go     "
+E72B  7B47206F7220473C616464723E7D                 fcc     "{G or G<addr>}"
+E739  0D0A                            fcb     CR,LF
+                      
+E73B  43616C63202020                  fcc     "Calc   "
+E742  7B436865786E756D7B2B7C2D6865786E756D7D7D                 fcc     "{Chexnum{+|-hexnum}}"
+E756  0D0A                            fcb     CR,LF
+                      
+E758  496E7020202020                  fcc     "Inp    "
+E75F  7B49616464727D                  fcc     "{Iaddr}"
+E766  0D0A                            fcb     CR,LF
+                      
+E768  4A756D70202020                  fcc     "Jump   "
+E76F  7B4A3C616464723E7D                 fcc     "{J<addr>}"
+E778  0D0A                            fcb     CR,LF
+                      
+E77A  4D6F7665202020                  fcc     "Move   "
+E781  7B4D3C61646472313E2C3C61646472323E2C3C6C656E6768743E7D                 fcc     "{M<addr1>,<addr2>,<lenght>}"
+E79C  0D0A                            fcb     CR,LF
+                      
+E79E  50726F67202020                  fcc     "Prog   "
+E7A5  7B507D                          fcc     "{P}"
+E7A8  0D0A                            fcb     CR,LF
+                      
+E7AA  52656773202020                  fcc     "Regs   "
+E7B1  7B52206F7220523C6C65747465723E3C6865783E7D                 fcc     "{R or R<letter><hex>}"
+E7C6  0D0A                            fcb     CR,LF
+                      
+E7C8  53726563202020                  fcc     "Srec   "
+E7CF  7B534F3C616464723E206F722053533C616464723E2C3C6C656E3E206F722053313C62797465733E206F722053393C62797465733E7D                 fcc     "{SO<addr> or SS<addr>,<len> or S1<bytes> or S9<bytes>}"
+E805  0D0A                            fcb     CR,LF
+                      
+E807  54726163652020                  fcc     "Trace  "
+E80E  7B547D                          fcc     "{T}"
+E811  0D0A                            fcb     CR,LF
+                      
+E813  586D6F64656D20                  fcc     "Xmodem "
+E81A  7B5853616464722C6C656E20584C616464722C6C656E20585820584F63726C662C66696C6C65722C20585353616464722C6C656E7D                 fcc     "{XSaddr,len XLaddr,len XX XOcrlf,filler, XSSaddr,len}"
+E84F  0D0A                            fcb     CR,LF
+                      
+E851  48656C70202020                  fcc     "Help   "
+E858  7B487D                          fcc     "{H}"
+E85B  0D0A00                          fcb     CR,LF,0
+                      
+                      
+                      
+                      * Here are some useful messages.
+E85E  1C              welcome         fcb unknown-welcome-1
+E85F  57656C636F6D6520746F2042554747592076657273696F6E20312E30                 fcc "Welcome to BUGGY version 1.0"
+E87B  0F              unknown         fcb brkmsg-unknown-1
+E87C  556E6B6E6F776E20636F6D6D616E64                 fcc "Unknown command"
+E88B  0E              brkmsg          fcb clrmsg-brkmsg-1
+E88C  427265616B706F696E7420736574                 fcc "Breakpoint set"
+E89A  12              clrmsg          fcb fullmsg-clrmsg-1
+E89B  427265616B706F696E7420636C6561726564                 fcc "Breakpoint cleared"
+E8AD  10              fullmsg         fcb smsg-fullmsg-1
+E8AE  427265616B706F696E74732066756C6C                 fcc "Breakpoints full"
+E8BE  11              smsg            fcb lastrec-smsg-1
+E8BF  4572726F7220696E2053207265636F7264                 fcc "Error in S record"
+E8D0  0A              lastrec         fcb xsmsg-lastrec-1
+E8D1  53393033303030304643                 fcc "S9030000FC"
+E8DB  11              xsmsg           fcb xrmsg-xsmsg-1
+E8DC  537461727420584D4F44454D2053656E64                 fcc "Start XMODEM Send"
+E8ED  14              xrmsg           fcb xamsg-xrmsg-1
+E8EE  537461727420584D4F44454D2052656365697665                 fcc "Start XMODEM Receive"
+E902  17              xamsg           fcb invmmsg-xamsg-1
+E903  584D4F44454D207472616E736665722061626F72746564                 fcc "XMODEM transfer aborted"
+E91A  10              invmmsg         fcb exprmsg-invmmsg-1
+E91B  496E76616C6964206D6E656D6F6E6963                 fcc "Invalid mnemonic"
+E92B  10              exprmsg         fcb modemsg-exprmsg-1
+E92C  45787072657373696F6E206572726F72                 fcc "Expression error"
+E93C  15              modemsg         fcb brmsg-modemsg-1
+E93D  41646472657373696E67206D6F6465206572726F72                 fcc "Addressing mode error"
+E952  0F              brmsg           fcb endmsg-brmsg-1
+E953  4272616E636820746F6F206C6F6E67                 fcc "Branch too long"
+E962                  endmsg          equ *
+                      
+                      * Output hex digit contained in A
+E962  8B90            hexdigit        adda #$90
+E964  19                              daa
+E965  8940                            adca #$40
+E967  19                              daa             ;It's the standard conversion trick ascii
+E968  1F89                            tfr a,b         ;to hex without branching.
+E96A  9D03                            jsr putchar
+E96C  39                              rts
+                      
+                      * Output contents of A as two hex digits 
+E96D  3402            outbyte         pshs a
+E96F  44                              lsra
+E970  44                              lsra
+E971  44                              lsra
+E972  44                              lsra
+E973  8DED                            bsr hexdigit
+E975  3502                            puls a
+E977  840F                            anda #$0f
+E979  20E7                            bra hexdigit
+                      
+                      * Output contents of d as four hex digits 
+E97B  3404            outd            pshs b
+E97D  8DEE                            bsr outbyte
+E97F  3502                            puls a
+E981  8DEA                            bsr outbyte
+E983  39                              rts
+                      
+                      * Skip X past spaces, B is first non-space character.
+E984  E680            skipspace       ldb ,x+
+E986  C120                            cmpb #' '
+E988  27FA                            beq skipspace
+E98A  39                              rts
+                      
+                      * Convert ascii hex digit in B register to binary Z flag set if no hex digit. 
+E98B  C030            convb           subb #'0'
+E98D  2513                            blo convexit
+E98F  C109                            cmpb #9
+E991  230C                            bls cb2
+E993  C4DF                            andb #CASEMASK ;Make uppercase.
+E995  C007                            subb #7         ;If higher than digit 9 it must be a letter.
+E997  C109                            cmpb #9
+E999  2307                            bls convexit
+E99B  C10F                            cmpb #15
+E99D  2203                            bhi convexit
+E99F  1CFB            cb2             andcc #$FB      ;clear zero     
+E9A1  39                              rts
+E9A2  1A04            convexit        orcc #$04
+E9A4  39                              rts
+                      
+E9A5  DC24            scanexit        ldd temp
+E9A7  301F                            leax -1,x
+E9A9  0D26                            tst temp2
+E9AB  39                              rts             ;<-- exit point of scanhex
+                      
+                      * Scan for hexadecimal number at address X return in D, Z flag is set it no
+                      * number found.
+E9AC  0F24            scanhex         clr temp
+E9AE  0F25                            clr temp+1
+E9B0  0F26                            clr temp2
+E9B2  8DD0                            bsr skipspace
+E9B4  BDE98B          scloop          jsr convb
+E9B7  27EC                            beq scanexit
+E9B9  3404                            pshs b
+E9BB  DC24                            ldd temp
+E9BD  58                              aslb
+E9BE  49                              rola
+E9BF  58                              aslb
+E9C0  49                              rola
+E9C1  58                              aslb
+E9C2  49                              rola
+E9C3  58                              aslb
+E9C4  49                              rola
+E9C5  EBE0                            addb ,s+
+E9C7  DD24                            std temp
+E9C9  0C26                            inc temp2
+E9CB  E680                            ldb ,x+
+E9CD  20E5                            bra scloop
+                      
+E9CF  FD02A2          scan2parms      std length
+E9D2  8DD8                            bsr scanhex
+E9D4  2710                            beq sp2
+E9D6  FD02A0                          std addr
+E9D9  8DA9                            bsr skipspace
+E9DB  C12C                            cmpb #','
+E9DD  2607                            bne sp2
+E9DF  8DCB                            bsr scanhex
+E9E1  2703                            beq sp2
+E9E3  FD02A2                          std length
+E9E6  39              sp2             rts
+                      
+                      * Scan two hexdigits at in and convert to byte into A, Z flag if error.
+E9E7  8D9B            scanbyte        bsr skipspace
+E9E9  8DA0                            bsr convb
+E9EB  2712                            beq sb1
+E9ED  1F98                            tfr b,a
+E9EF  E680                            ldb ,x+
+E9F1  8D98                            bsr convb
+E9F3  270A                            beq sb1
+E9F5  48                              asla
+E9F6  48                              asla
+E9F7  48                              asla
+E9F8  48                              asla
+E9F9  D724                            stb temp
+E9FB  9B24                            adda temp
+E9FD  1CFB                            andcc #$fb      ;Clear zero flag
+E9FF  39              sb1             rts
+                      
+                      
+                      * This is the code for the D command, hex/ascii dump of memory
+                      * Syntax: D or D<addr> or D<addr>,<length>
+EA00  8E0201          dump            ldx #linebuf+1
+EA03  CC0040                          ldd #$40        
+EA06  BDE9CF                          jsr scan2parms ;Scan address and length, default length=64
+EA09  10BE02A0                        ldy addr
+EA0D  8610            dh1             lda #16
+EA0F  9725                            sta temp+1      
+EA11  1F20                            tfr y,d
+EA13  BDE97B                          jsr outd
+EA16  C620                            ldb #' '
+EA18  9D03                            jsr putchar
+EA1A  A6A0            dh2             lda ,y+         ;display row of 16 mem locations as hex
+EA1C  BDE96D                          jsr outbyte
+EA1F  C620                            ldb #' '
+EA21  9625                            lda temp+1
+EA23  8109                            cmpa #9
+EA25  2602                            bne dh6
+EA27  C62D                            ldb #'-'        ;Do a - after the eighth byte.
+EA29  9D03            dh6             jsr putchar
+EA2B  0A25                            dec temp+1
+EA2D  26EB                            bne dh2
+EA2F  3130                            leay -16,y      ;And now for the ascii dump.
+EA31  8610                            lda #16
+EA33  E6A0            dh3             ldb ,y+
+EA35  C120                            cmpb #' '
+EA37  2402                            bhs dh4
+EA39  C62E                            ldb #'.'
+EA3B  C17F            dh4             cmpb #DEL
+EA3D  2502                            blo dh5
+EA3F  C62E                            ldb #'.'        ;Convert all nonprintables to .
+EA41  9D03            dh5             jsr putchar
+EA43  4A                              deca
+EA44  26ED                            bne dh3
+EA46  9D0C                            jsr putcr
+EA48  FC02A2                          ldd length
+EA4B  830010                          subd #16
+EA4E  FD02A2                          std length
+EA51  22BA                            bhi dh1
+EA53  10BF02A0                        sty addr
+EA57  7EE581                          jmp cmdline
+                      
+                      * This is the code for the E command, enter hex bytes or ascii string.
+                      * Syntax E or E<addr> or E<addr> <bytes> or E<addr>"string"
+EA5A  8E0201          enter           ldx #linebuf+1
+EA5D  BDE9AC                          jsr scanhex
+EA60  2703                            beq ent1
+EA62  FD02A0                          std addr
+EA65  8D3F            ent1            bsr entline
+EA67  1026FB16                        lbne cmdline    ;No bytes, then enter interactively.
+EA6B  C645            ent2            ldb #'E'
+EA6D  9D03                            jsr putchar
+EA6F  FC02A0                          ldd addr 
+EA72  BDE97B                          jsr outd
+EA75  C620                            ldb #' '
+EA77  9D03                            jsr putchar     ;Display Eaddr + space
+EA79  A69F02A0                        lda [addr]
+EA7D  BDE96D                          jsr outbyte
+EA80  C620                            ldb #' '
+EA82  9D03                            jsr putchar
+EA84  8E0200                          ldx #linebuf
+EA87  C680                            ldb #buflen
+EA89  9D06                            jsr getline     ;Get the line.
+EA8B  5D                              tstb
+EA8C  270D                            beq skipbyte
+EA8E  3A                              abx
+EA8F  6F84                            clr ,x
+EA91  8E0200                          ldx #linebuf
+EA94  8D10                            bsr entline
+EA96  26D3                            bne ent2
+EA98  7EE581                          jmp cmdline 
+EA9B  FC02A0          skipbyte        ldd addr
+EA9E  C30001                          addd #1
+EAA1  FD02A0                          std addr
+EAA4  20C5                            bra ent2
+                      
+                      * Enter a line of hex bytes or ascci string at address X, Z if empty.
+EAA6  BDE984          entline         jsr skipspace
+EAA9  5D                              tstb
+EAAA  272F                            beq entexit
+EAAC  C12E                            cmpb #'.'
+EAAE  272B                            beq entexit
+EAB0  C122                            cmpb #'"'
+EAB2  270F                            beq entasc 
+EAB4  301F                            leax -1,x
+EAB6  10BE02A0                        ldy addr
+EABA  BDE9E7          entl2           jsr scanbyte  ;Enter hex digits.
+EABD  2715                            beq entdone
+EABF  A7A0                            sta ,y+
+EAC1  20F7                            bra entl2
+EAC3  10BE02A0        entasc          ldy addr
+EAC7  A680            entl3           lda ,x+
+EAC9  4D                              tsta
+EACA  2708                            beq entdone
+EACC  8122                            cmpa #'"'
+EACE  2704                            beq entdone
+EAD0  A7A0                            sta ,y+
+EAD2  20F3                            bra entl3
+EAD4  10BF02A0        entdone         sty addr
+EAD8  1CFB                            andcc #$fb
+EADA  39                              rts
+EADB  1A04            entexit         orcc #$04
+EADD  39                              rts
+                      
+                      *This is the code for the I command, display the contents of an address
+                      * Syntax: Iaddr
+EADE  8E0201          inp             ldx #linebuf+1
+EAE1  BDE9AC                          jsr scanhex
+EAE4  1F01                            tfr d,x
+EAE6  A684                            lda ,x          ;Read the byte from memory.
+EAE8  BDE96D                          jsr outbyte     ;Display itin hex.
+EAEB  9D0C                            jsr putcr
+EAED  7EE581                          jmp cmdline
+                      
+                      *This is the code for the H command, display result of simple hex expression
+                      *Syntax Hhexnum{+|-hexnum}
+EAF0  8E0201          calc            ldx #linebuf+1
+EAF3  BDE9AC                          jsr scanhex
+EAF6  DD28                            std temp3
+EAF8  BDE984          hexloop         jsr skipspace
+EAFB  C12B                            cmpb #'+'
+EAFD  2609                            bne hex1
+EAFF  BDE9AC                          jsr scanhex
+EB02  D328                            addd temp3
+EB04  DD28                            std temp3
+EB06  20F0                            bra hexloop
+EB08  C12D            hex1            cmpb #'-'
+EB0A  260E                            bne hexend
+EB0C  BDE9AC                          jsr scanhex
+EB0F  53                              comb
+EB10  43                              coma
+EB11  C30001                          addd #1
+EB14  D328                            addd temp3
+EB16  DD28                            std temp3
+EB18  20DE                            bra hexloop
+EB1A  DC28            hexend          ldd temp3
+EB1C  BDE97B                          jsr outd
+EB1F  9D0C                            jsr putcr
+EB21  7EE581                          jmp cmdline
+                      
+                      * This is the code for the G command, jump to the program
+                      * Syntax G or G<addr>
+EB24  8E0201          go              ldx #linebuf+1
+EB27  BDE9AC                          jsr scanhex
+EB2A  2702                            beq launch
+EB2C  ED6A                            std 10,s        ;Store parameter in pc location.
+EB2E  BDEC74          launch          jsr arm         ;Arm the breakpoints.  
+                      ;               puls ccr,b,a,dp,x,y,u,pc
+EB31  35FF                            puls cc,b,a,dp,x,y,u,pc
+                      
+                      * This is the code for the J command, run a subroutine.
+                      * Syntax J<addr>
+EB33  8E0201          jump            ldx #linebuf+1
+EB36  EC6A                            ldd 10,s
+EB38  FD029E                          std oldpc       ;Save old pc
+EB3B  BDE9AC                          jsr scanhex
+EB3E  ED6A                            std 10,s        ;Store parameter in PC location
+EB40  1F41                            tfr s,x
+EB42  327E                            leas -2,s
+EB44  1F43                            tfr s,u
+EB46  C60C                            ldb #12         ;Move the saved register set 2 addresses
+EB48  BDE44C                          jsr blockmove   ;down on the stack.
+EB4B  CCE567                          ldd #stakregs
+EB4E  ED6C                            std 12,s        ;Prepare subroutine return address.
+EB50  20DC                            bra launch      ;Jump to the routine.
+                      
+                      
+                      * This is the code for the P command, run instruction followed by breakpoint
+                      * Syntax P
+EB52  10AE6A          prog            ldy 10,s        ;Get program counter value.
+EB55  BDF663                          jsr disdecode   ;Find out location past current insn.
+EB58  10BF02BC                        sty stepbp
+EB5C  20D0                            bra launch
+                      
+                      * This is the code for the T command, single step trace an instruction.
+                      * Syntax T
+EB5E  BDEB67          trace           jsr traceone
+EB61  BDEBAF                          jsr dispregs
+EB64  7EE581                          jmp cmdline
+                      
+EB67  1A50            traceone        orcc #$50       ;Disable the interrupts.
+EB69  ECE1                            ldd ,s++        
+EB6B  FD029E                          std oldpc       ;Remove saved pc from stack.
+EB6E  CCEB83                          ldd #traceret
+EB71  FD0287                          std firqvec+1   ;Adjust timer IRQ vector.
+EB74  13                              sync            ;Synchronize on the next timer interrupt.
+                                                      ;1 cycle
+EB75  8E1159                          ldx #4441       ;3 cycles
+EB78  301F            traceloop       leax -1,x       ;6 cycles\x4441= 39969 cycles.
+EB7A  26FC                            bne traceloop   ;3 cycles/
+EB7C  12                              nop             ;2 cycles.
+EB7D  12                              nop             ;2 cycles.
+EB7E  12                              nop             ;2 cycles.
+EB7F  2102                            brn traceret    ;3 cycles.
+EB81  35FF                            puls x,y,u,a,b,dp,cc,pc ;17 cycles, total=39999 20ms @ 2MHz
+                                                              ;Pull all registers and execute.
+                                                              ;Is timed such that next timer IRQ
+                                                              ;occurs right after it.
+EB83  3501            traceret        puls cc
+EB85  347F                            pshs x,y,u,a,b,dp,cc;Store full register set instead of cc.
+EB87  CCE510                          ldd #timerirq
+EB8A  FD0287                          std firqvec+1   ;Restore timer IRQ vector.
+EB8D  6E9F029E                        jmp [oldpc]
+                                                      
+                      
+                      * Display the contents of 8 bit register, name in B, contents in A
+EB91  9D03            disp8           jsr putchar
+EB93  C63D                            ldb #'='
+EB95  9D03                            jsr putchar
+EB97  BDE96D                          jsr outbyte
+EB9A  C620                            ldb #' '
+EB9C  9D03                            jsr putchar
+EB9E  39                              rts
+                      
+                      * Display the contents of 16 bit register, name in B, contents in Y
+EB9F  9D03            disp16          jsr putchar
+EBA1  C63D                            ldb #'='
+EBA3  9D03                            jsr putchar
+EBA5  1F20                            tfr y,d
+EBA7  BDE97B                          jsr outd
+EBAA  C620                            ldb #' '
+EBAC  9D03                            jsr putchar
+EBAE  39                              rts
+                      
+                      * Display the contents of the registers and disassemble instruction at
+                      * PC location.
+EBAF  C658            dispregs        ldb #'X'
+EBB1  10AE66                          ldy 6,s         ;Note that there's one return address on
+EBB4  8DE9                            bsr disp16      ;stack so saved register offsets are 
+EBB6  C659                            ldb #'Y'        ;inremented by 2.
+EBB8  10AE68                          ldy 8,s
+EBBB  8DE2                            bsr disp16
+EBBD  C655                            ldb #'U'
+EBBF  10AE6A                          ldy 10,s
+EBC2  8DDB                            bsr disp16
+EBC4  C653                            ldb #'S'
+EBC6  1F42                            tfr s,y
+EBC8  312E                            leay 14,y       ;S of the running program is 12 higher,
+                                                      ;because regs are not stacked when running.
+EBCA  8DD3                            bsr disp16
+EBCC  C641                            ldb #'A'
+EBCE  A663                            lda 3,s
+EBD0  8DBF                            bsr disp8
+EBD2  C642                            ldb #'B'
+EBD4  A664                            lda 4,s
+EBD6  8DB9                            bsr disp8
+EBD8  C644                            ldb #'D'
+EBDA  A665                            lda 5,s
+EBDC  8DB3                            bsr disp8
+EBDE  C643                            ldb #'C'
+EBE0  A662                            lda 2,s
+EBE2  8DAD                            bsr disp8
+EBE4  9D0C                            jsr putcr
+EBE6  C650                            ldb #'P'
+EBE8  10AE6C                          ldy 12,s
+EBEB  8DB2                            bsr disp16
+EBED  BDF663                          jsr disdecode
+EBF0  BDF746                          jsr disdisp       ;Disassemble instruction at PC
+EBF3  9D0C                            jsr putcr
+EBF5  39                              rts
+                      
+                      
+                      * This is the code for the R command, display or alter the registers.
+                      * Syntax R or R<letter><hex>
+EBF6  8E0201          regs            ldx #linebuf+1
+EBF9  BDE984                          jsr skipspace
+EBFC  5D                              tstb
+EBFD  2605                            bne setreg
+EBFF  8DAE                            bsr dispregs    ;Display regs ifnothing follows.
+EC01  7EE581                          jmp cmdline
+EC04  108EEC50        setreg          ldy #regtab
+EC08  4F                              clra
+EC09  C4DF                            andb #CASEMASK  ;Make letter uppercase.
+EC0B  6DA4            sr1             tst ,y
+EC0D  1027F9D0                        lbeq unk        ;At end of register tab, unknown reg
+EC11  E1A0                            cmpb ,y+
+EC13  2703                            beq sr2         ;Found the register?
+EC15  4C                              inca
+EC16  20F3                            bra sr1
+EC18  3402            sr2             pshs a
+EC1A  BDE9AC                          jsr scanhex     ;Convert the hex argument.
+EC1D  3406                            pshs d
+EC1F  A662                            lda 2,s         ;Get register number.
+EC21  8104                            cmpa #4
+EC23  2409                            bcc sr3         
+EC25  E661                            ldb 1,s         ;It's 8 bit.            
+EC27  3263                            leas 3,s        ;Remove temp stuff from stack.
+EC29  E7E6                            stb a,s         ;Store it in the reg on stack.
+EC2B  7EE581                          jmp cmdline
+EC2E  8108            sr3             cmpa #8
+EC30  240C                            bcc sr4         
+EC32  3510                            puls x          ;It's 16 bit.
+EC34  3261                            leas 1,s
+EC36  48                              lsla
+EC37  8004                            suba #4         ;Convert reg no to stack offset.
+EC39  AFE6                            stx a,s
+EC3B  7EE581                          jmp cmdline
+EC3E  3540            sr4             puls u          ;It's the stack pointer.
+EC40  3261                            leas 1,s
+EC42  3354                            leau -12,u
+EC44  1F41                            tfr s,x
+EC46  1F34                            tfr u,s         ;Set new stack pointer.
+EC48  C60C                            ldb #12
+EC4A  BDE44C                          jsr blockmove   ;Move register set to new stack location.
+EC4D  7EE581                          jmp cmdline
+                      
+EC50  43414244585955505320 regtab          FCC "CABDXYUPS "
+                      
+                      * Disarm the breakpoints, this is replace the SWI instructions with the
+                      * original byte.
+EC5A  8E02A4          disarm          ldx #bpaddr
+EC5D  8609                            lda #brkpoints+1
+EC5F  EE81            disarm1         ldu ,x++
+EC61  E680                            ldb ,x+         ;Get address in u, byte in b
+EC63  11830000                        cmpu #0
+EC67  2702                            beq disarm2
+EC69  E7C4                            stb ,u
+EC6B  4A              disarm2         deca
+EC6C  26F1                            bne disarm1
+EC6E  CE0000                          ldu #0
+EC71  EF1D                            stu -3,x        ;Clear the step breakpoint.
+EC73  39                              rts
+                      
+                      * Arm the breakponts, this is replace the byte at the breakpoint address
+                      * with an SWI instruction.
+EC74  8E02BC          arm             ldx #bpaddr+brkpoints*3
+EC77  8609                            lda #brkpoints+1  ;Arm them in reverse order of disarming.
+EC79  EE84            arm1            ldu ,x       ;Get address in u.
+EC7B  270D                            beq arm2
+EC7D  E6C4                            ldb ,u
+EC7F  E702                            stb 2,x
+EC81  11A36C                          cmpu 12,s      ;Compare to program counter location
+EC84  2704                            beq arm2
+EC86  C63F                            ldb #$3F
+EC88  E7C4                            stb ,u         ;Store SWI instruction if not equal.
+EC8A  301D            arm2            leax -3,x
+EC8C  4A                              deca
+EC8D  26EA                            bne arm1
+EC8F  39                              rts
+                      
+                      * This is the code for the break command, set, clear display breakpoints.
+                      * Syntax B or B<addr>. B displays, B<addr> sets or clears breakpoint.
+EC90  8608            break           lda #brkpoints
+EC92  9727                            sta temp2+1     ;Store number of breakpoints to visit.
+EC94  8E0201                          ldx #linebuf+1
+EC97  BDE9AC                          jsr scanhex
+EC9A  273B                            beq dispbp      ;No number then display breakpoints
+EC9C  8E02A4                          ldx #bpaddr
+EC9F  CE0000                          ldu #0
+ECA2  1F32                            tfr u,y
+ECA4  10A384          bp1             cmpd ,x
+ECA7  2720                            beq clearit     ;Found the breakpoint, so clear it,
+ECA9  11A384                          cmpu ,x         ;Is location zero
+ECAC  2602                            bne bp2
+ECAE  1F12                            tfr x,y         ;Set free address to y
+ECB0  3003            bp2             leax 3,x
+ECB2  0A27                            dec temp2+1
+ECB4  26EE                            bne bp1
+ECB6  108C0000                        cmpy #0         ;Address not found in list of breakpoints
+ECBA  2716                            beq bpfull      ;Was free address found.
+ECBC  EDA4                            std ,y          ;If so, store breakpoint there.
+ECBE  8EE88B                          ldx #brkmsg     
+ECC1  BDE507          bpexit          jsr outcount
+ECC4  9D0C                            jsr putcr
+ECC6  7EE581                          jmp cmdline
+ECC9  4F              clearit         clra
+ECCA  5F                              clrb
+ECCB  ED84                            std ,x
+ECCD  8EE89A                          ldx #clrmsg
+ECD0  20EF                            bra bpexit
+ECD2  8EE8AD          bpfull          ldx #fullmsg
+ECD5  20EA                            bra bpexit
+                      
+ECD7  8E02A4          dispbp          ldx #bpaddr
+ECDA  EC84            dbp1            ldd ,x
+ECDC  2707                            beq dbp2
+ECDE  BDE97B                          jsr outd
+ECE1  C620                            ldb #' '
+ECE3  9D03                            jsr putchar
+ECE5  3003            dbp2            leax 3,x
+ECE7  0A27                            dec temp2+1
+ECE9  26EF                            bne dbp1
+ECEB  9D0C                            jsr putcr
+ECED  7EE581                          jmp cmdline
+                      
+                      * Scan hex byte into a and add it to check sum in temp2+1
+ECF0  BDE9E7          addchk          jsr scanbyte
+ECF3  10270077                        lbeq srecerr
+ECF7  1F89                            tfr a,b
+ECF9  DB27                            addb temp2+1
+ECFB  D727                            stb temp2+1
+ECFD  39                              rts
+                      
+                      * This tis the code for the S command, the Motorola S records entry.
+                      * Syntax SO<addr> or SS<addr>,<len> or S1<bytes> or S9<bytes>
+ECFE  8E0201          srec            ldx #linebuf+1
+ED01  E680                            ldb ,x+
+ED03  C4DF                            andb #CASEMASK
+ED05  C14F                            cmpb #'O'
+ED07  2772                            beq setsorg
+ED09  C153                            cmpb #'S'
+ED0B  277C                            beq sendrec               ;CJ changed to LBEQ from BEQ?
+ED0D  E61F                            ldb -1,x
+ED0F  0F28                            clr temp3
+ED11  C131                            cmpb #'1'
+ED13  2706                            beq readrec
+ED15  C139                            cmpb #'9'
+ED17  2655                            bne srecerr
+ED19  0C28                            inc temp3
+ED1B  0F27            readrec         clr temp2+1     ;clear checksum.
+ED1D  8DD1                            bsr addchk
+ED1F  8002                            suba #2         ;discount the address bytes from the count.
+ED21  9729                            sta temp3+1     ;Read length byte.
+ED23  8DCB                            bsr addchk
+ED25  3402                            pshs a
+ED27  8DC7                            bsr addchk
+ED29  3504                            puls b
+ED2B  1E89                            exg a,b         ;Read address into d.
+ED2D  FE02BF                          ldu sorg
+ED30  270F                            beq rr1
+ED32  FE02C1                          ldu soffs
+ED35  260A                            bne rr1
+ED37  3406                            pshs d          ;Sorg is nonzero and soffs is zero, now
+ED39  B302BF                          subd sorg       ;set soffs
+ED3C  FD02C1                          std soffs
+ED3F  3506                            puls d
+ED41  B302C1          rr1             subd soffs      ;Subtract the address offset.
+ED44  1F02                            tfr d,y
+ED46  8DA8            rr2             bsr addchk
+ED48  0A29                            dec temp3+1
+ED4A  2704                            beq endrec
+ED4C  A7A0                            sta ,y+
+ED4E  20F6                            bra rr2
+ED50  0C27            endrec          inc temp2+1     ;Check checksum.
+ED52  261A                            bne srecerr
+ED54  0D28                            tst temp3
+ED56  1027F827                        lbeq cmdline    ;Was it no S9 record?
+ED5A  108C0000                        cmpy #0
+ED5E  2703                            beq endrec1 
+ED60  10AF6A                          sty 10,s        ;Store address into program counter.
+ED63  4F              endrec1         clra
+ED64  5F                              clrb
+ED65  FD02BF                          std sorg        ;Reset sorg, next S loads will be normal.
+ED68  FD02C1                          std soffs
+ED6B  7EE581                          jmp cmdline
+ED6E  9D18            srecerr         jsr xabortin
+ED70  8EE8BE                          ldx #smsg       ;Error in srecord, display message.
+ED73  BDE507                          jsr outcount
+ED76  9D0C                            jsr putcr
+ED78  7EE581                          jmp cmdline
+ED7B  BDE9AC          setsorg         jsr scanhex     ;Set S record origin.
+ED7E  FD02BF                          std sorg
+ED81  4F                              clra 
+ED82  5F                              clrb
+ED83  FD02C1                          std soffs
+ED86  7EE581                          jmp cmdline
+                      * Send a memory region as S-records.
+ED89  CC0100          sendrec         ldd #$100       ;Scan address and length parameter.
+ED8C  BDE9CF                          jsr scan2parms
+ED8F  FC02BF                          ldd sorg
+ED92  2709                            beq ss1
+ED94  FC02A0                          ldd addr
+ED97  B302BF                          subd sorg
+ED9A  FD02C1                          std soffs       ;Compute offset for origin.
+ED9D  FC02A2          ss1             ldd length      
+EDA0  2748                            beq endss       ;All bytes sent?
+EDA2  10830010                        cmpd #16
+EDA6  2502                            blo ss2
+EDA8  C610                            ldb #16         ;If more than 16 left, then send 16.
+EDAA  D724            ss2             stb temp
+EDAC  50                              negb
+EDAD  FE02A2                          ldu length
+EDB0  33C5                            leau b,u
+EDB2  FF02A2                          stu length      ;Discount line length from length.
+EDB5  C653                            ldb #'S'
+EDB7  9D03                            jsr putchar
+EDB9  C631                            ldb #'1'
+EDBB  9D03                            jsr putchar
+EDBD  0F25                            clr temp+1      ;Clear check sum
+EDBF  D624                            ldb temp
+EDC1  CB03                            addb #3
+EDC3  8D30                            bsr checkout    ;Output byte b as hex and add to check sum.
+EDC5  FC02A0                          ldd addr
+EDC8  1F02                            tfr d,y
+EDCA  B302C1                          subd soffs
+EDCD  1E89                            exg a,b
+EDCF  8D24                            bsr checkout
+EDD1  1E89                            exg a,b
+EDD3  8D20                            bsr checkout    ;Output address (add into check sum)
+EDD5  E6A0            ss3             ldb ,y+
+EDD7  8D1C                            bsr checkout
+EDD9  0A24                            dec temp
+EDDB  26F8                            bne ss3
+EDDD  10BF02A0                        sty addr
+EDE1  D625                            ldb temp+1
+EDE3  53                              comb
+EDE4  8D0F                            bsr checkout    ;Output checksum byte.
+EDE6  9D0C                            jsr putcr
+EDE8  20B3                            bra ss1
+EDEA  8EE8D0          endss           ldx #lastrec
+EDED  BDE507                          jsr outcount
+EDF0  9D0C                            jsr putcr
+EDF2  7EE581                          jmp cmdline
+                      * Output byte in register B and add it into check sum at temp+1
+EDF5  3402            checkout        pshs a
+EDF7  1F98                            tfr b,a
+EDF9  DB25                            addb temp+1
+EDFB  D725                            stb temp+1
+EDFD  BDE96D                          jsr outbyte
+EE00  3502                            puls a
+EE02  39                              rts
+                      
+                      * This is the code for the M command, move memory region.
+                      * Syntax: Maddr1,addr2,length
+EE03  8E0201          move            ldx #linebuf+1
+EE06  BDE9AC                          jsr scanhex
+EE09  1027F7D4                        lbeq unk
+EE0D  DD28                            std temp3
+EE0F  BDE984                          jsr skipspace
+EE12  C12C                            cmpb #','
+EE14  1026F7C9                        lbne unk
+EE18  BDE9AC                          jsr scanhex
+EE1B  1027F7C2                        lbeq unk
+EE1F  1F03                            tfr d,u
+EE21  BDE984                          jsr skipspace
+EE24  C12C                            cmpb #','
+EE26  1026F7B7                        lbne unk
+EE2A  BDE9AC                          jsr scanhex
+EE2D  1027F7B0                        lbeq unk
+EE31  1F02                            tfr d,y         ;Read the argument separated by commas
+EE33  9E28                            ldx temp3       ;src addr to x, dest addr to u, length to y
+                                                      ;Don't tolerate syntax deviations.
+EE35  A680            mvloop          lda ,x+
+EE37  A7C0                            sta ,u+
+EE39  313F                            leay -1,y
+EE3B  26F8                            bne mvloop      ;Perform the block move.
+EE3D  7EE581                          jmp cmdline
+                                      
+                      
+                      * This is the code for the F command, find byte/ascii string in memory.
+                      * Syntax: Faddr bytes or Faddr "ascii"
+EE40  8E0201          find            ldx #linebuf+1
+EE43  BDE9AC                          jsr scanhex
+EE46  1F02                            tfr d,y         ;Scan the start address.
+EE48  BDE984                          jsr skipspace
+EE4B  C122                            cmpb #'"'
+EE4D  2611                            bne findhex
+EE4F  CE0200                          ldu #linebuf    ;Quote found, so scan for quoted string.
+EE52  4F                              clra
+EE53  E680            fstrloop        ldb ,x+
+EE55  271F                            beq startsrch   ;End of line without final quote.
+EE57  C122                            cmpb #'"'
+EE59  271B                            beq startsrch   ;End quote found
+EE5B  E7C0                            stb ,u+
+EE5D  4C                              inca
+EE5E  20F3                            bra fstrloop
+EE60  CE0200          findhex         ldu #linebuf    ;Convert string of hex bytes.
+EE63  301F                            leax -1,x       ;String will be stored at start of line
+EE65  4F                              clra            ;buffer and may overwrite part of the
+EE66  3402            fhexloop        pshs a          ;already converted string.
+EE68  BDE9E7                          jsr scanbyte
+EE6B  1F89                            tfr a,b
+EE6D  3502                            puls a
+EE6F  2705                            beq startsrch
+EE71  E7C0                            stb ,u+
+EE73  4C                              inca
+EE74  20F0                            bra fhexloop
+EE76  4D              startsrch       tsta            ;Start searching, start addr in Y, 
+                                                      ;string starts at linebuf, length A
+EE77  1027F706                        lbeq cmdline    ;Quit with zero length string.
+EE7B  0F28                            clr temp3
+EE7D  9729                            sta temp3+1
+EE7F  1F21            srchloop        tfr y,x
+EE81  9629                            lda temp3+1
+EE83  8CE100                          cmpx #$e100
+EE86  2409                            bcc srch1
+EE88  3086                            leax a,x
+EE8A  8CE000                          cmpx #$e000     ;Stop at I/O addresses.
+EE8D  1024F6F0                        lbcc cmdline
+EE91  1F21            srch1           tfr y,x
+EE93  CE0200                          ldu #linebuf
+EE96  E680            srch2           ldb ,x+
+EE98  E1C0                            cmpb ,u+
+EE9A  2614                            bne srch3       ;Not equal, try next address.
+EE9C  4A                              deca 
+EE9D  26F7                            bne srch2
+EE9F  1F20                            tfr y,d
+EEA1  BDE97B                          jsr outd        ;String found
+EEA4  9D0C                            jsr putcr
+EEA6  0C28                            inc temp3
+EEA8  9628                            lda temp3
+EEAA  8110                            cmpa #$10
+EEAC  1027F6D1                        lbeq cmdline    ;If 10 matches found, just stop.
+EEB0  3121            srch3           leay 1,y
+EEB2  20CB                            bra srchloop
+                      
+                      * Send the contents of the xmodem buffer and get it acknowledged, zero flag
+                      * is set if transfer aborted.
+EEB4  C601            xsendbuf        ldb #SOH
+EEB6  BDE476                          jsr osputc      ;Send SOH
+EEB9  D62D                            ldb xpacknum
+EEBB  BDE476                          jsr osputc      ;Send block number.
+EEBE  53                              comb
+EEBF  BDE476                          jsr osputc      ;and its complement.
+EEC2  0F2E                            clr xsum
+EEC4  8680                            lda #128
+EEC6  8E0100                          ldx #buf0
+EEC9  E684            xsloop          ldb ,x
+EECB  DB2E                            addb xsum
+EECD  D72E                            stb xsum        
+EECF  E680                            ldb ,x+
+EED1  BDE476                          jsr osputc
+EED4  4A                              deca
+EED5  26F2                            bne xsloop      ;Send the buffer contents.
+EED7  D62E                            ldb xsum
+EED9  BDE476                          jsr osputc      ;Send the check sum
+EEDC  BDE45F          waitack         jsr osgetc
+EEDF  C118                            cmpb #CAN
+EEE1  270C                            beq xsabt       ;^X for abort.
+EEE3  C115                            cmpb #NAK
+EEE5  27CD                            beq xsendbuf    ;Send again if NAK
+EEE7  C106                            cmpb #ACK
+EEE9  26F1                            bne waitack
+EEEB  0C2D                            inc xpacknum
+EEED  1CFB            xsok            andcc #$fb      ;Clear zero flag after ACK
+EEEF  39              xsabt           rts
+                      
+                      * Start an XMODEM send session.
+EEF0  C601            xsendinit       ldb #1
+EEF2  D72D                            stb xpacknum    ;Initialize block number.
+EEF4  BDE45F          waitnak         jsr osgetc
+EEF7  C118                            cmpb #CAN
+EEF9  27F4                            beq xsabt      ;If ^X exit with zero flag.
+EEFB  C115                            cmpb #NAK
+EEFD  27EE                            beq xsok
+EEFF  20F3                            bra waitnak    ;Wait until NAK received.
+                      
+                      * Send ETX and wait for ack.
+EF01  C604            xsendeot        ldb #EOT
+EF03  BDE476                          jsr osputc
+EF06  BDE45F          waitack2        jsr osgetc
+EF09  C118                            cmpb #CAN
+EF0B  27E2                            beq xsabt
+EF0D  C115                            cmpb #NAK
+EF0F  27F0                            beq xsendeot
+EF11  C106                            cmpb #ACK
+EF13  27D8                            beq xsok
+EF15  20EF                            bra waitack2
+                      
+                      * Read character into B with a timeout of A seconds,  Carry set if timeout.
+EF17  48              gettimeout      asla
+EF18  C632                            ldb #50
+EF1A  3D                              mul
+EF1B  1F98                            tfr b,a
+EF1D  9B2C                            adda timer+2
+EF1F  BDE46A          gt1             jsr osgetpoll
+EF22  5D                              tstb
+EF23  2607                            bne gtexit
+EF25  912C                            cmpa timer+2
+EF27  26F6                            bne gt1         
+EF29  1A01                            orcc #$1
+EF2B  39                              rts
+EF2C  BDE45F          gtexit          jsr osgetc
+EF2F  1CFE                            andcc #$fe
+EF31  39                              rts
+                      
+                      * Wait until line becomes quiet.
+EF32  8603            purge           lda #3
+EF34  BDEF17                          jsr gettimeout
+EF37  24F9                            bcc purge
+EF39  39                              rts
+                      
+                      * Receive an XMODEM block and wait till it is OK, Z set if etx.
+EF3A  8603            xrcvbuf         lda #3
+EF3C  0D2F                            tst lastok
+EF3E  2709                            beq sendnak
+EF40  C606                            ldb #ACK
+EF42  BDE476                          jsr osputc      ;Send an ack.
+EF45  8605                            lda #5
+EF47  2005                            bra startblock
+EF49  C615            sendnak         ldb #NAK
+EF4B  BDE476                          jsr osputc      ;Send a NAK
+EF4E  0F2F            startblock      clr lastok
+EF50  8DC5                            bsr gettimeout
+EF52  8603                            lda #3
+EF54  25F3                            bcs sendnak     ;Keep sending NAKs when timed out.
+EF56  C104                            cmpb #EOT
+EF58  2753                            beq xrcveot     ;End of file reached, acknowledge EOT.
+EF5A  C101                            cmpb #SOH
+EF5C  264A                            bne purgeit     ;Not, SOH, bad block.
+EF5E  8601                            lda #1
+EF60  8DB5                            bsr gettimeout
+EF62  2544                            bcs purgeit
+EF64  D12D                            cmpb xpacknum   ;Is it the right block?
+EF66  2707                            beq xr1
+EF68  5C                              incb
+EF69  D12D                            cmpb xpacknum   ;Was it the previous block.
+EF6B  263B                            bne purgeit     
+EF6D  0C2F                            inc lastok
+EF6F  D72E            xr1             stb xsum
+EF71  8601                            lda #1
+EF73  8DA2                            bsr gettimeout
+EF75  2531                            bcs purgeit
+EF77  53                              comb
+EF78  D12E                            cmpb xsum       ;Is the complement of the block number OK
+EF7A  262C                            bne purgeit
+EF7C  8E0100                          ldx #buf0
+EF7F  0F2E                            clr xsum
+EF81  8601            xrloop          lda #1
+EF83  8D92                            bsr gettimeout
+EF85  2521                            bcs purgeit
+EF87  E780                            stb ,x+
+EF89  DB2E                            addb xsum
+EF8B  D72E                            stb xsum
+EF8D  8C0180                          cmpx #buf0+128
+EF90  26EF                            bne xrloop       ;Get the data bytes.
+EF92  8601                            lda #1
+EF94  17FF80                          lbsr gettimeout           ;CJ changed from BSR to LBSR?
+EF97  250F                            bcs purgeit
+EF99  D12E                            cmpb xsum
+EF9B  260B                            bne purgeit     ;Check the check sum.
+EF9D  0D2F                            tst lastok
+EF9F  2699                            bne xrcvbuf     ;Block was the previous block, get next one
+EFA1  0C2F                            inc lastok
+EFA3  0C2D                            inc xpacknum
+EFA5  1CFB                            andcc #$fb
+EFA7  39                              rts
+EFA8  BDEF32          purgeit         jsr purge
+EFAB  209C                            bra sendnak
+EFAD  8603            xrcveot         lda #3          ;EOT was received.
+EFAF  C606                            ldb #ACK
+EFB1  BDE476          ackloop         jsr osputc
+EFB4  4A                              deca
+EFB5  26FA                            bne ackloop     ;Send 3 acks in a row.
+EFB7  39                              rts
+                      
+                      
+EFB8  9E01            savevecs        ldx getchar+1
+EFBA  BF02C3                          stx oldgetc
+EFBD  9E04                            ldx putchar+1
+EFBF  BF02C5                          stx oldputc
+EFC2  9E0D                            ldx putcr+1
+EFC4  BF02C7                          stx oldputcr
+EFC7  7F02C9                          clr lastterm
+EFCA  39                              rts
+                      
+EFCB  BE02C3          rstvecs         ldx oldgetc
+EFCE  9F01                            stx getchar+1
+EFD0  BE02C5                          ldx oldputc
+EFD3  9F04                            stx putchar+1
+EFD5  BE02C7                          ldx oldputcr
+EFD8  9F0D                            stx putcr+1
+EFDA  7F02C9                          clr lastterm
+EFDD  39                              rts     
+                      
+                      * O.S. routine to open input through XMODEM transfer.
+EFDE  3416            xopin           pshs x,a,b
+EFE0  8EE8DB                          ldx #xsmsg
+EFE3  BDE507                          jsr outcount
+EFE6  9D0C                            jsr putcr       ;Display message to start XMODEM send.
+EFE8  8DCE                            bsr savevecs
+EFEA  8EF72C                          ldx #noop
+EFED  9F04                            stx putchar+1   ;Disable character output.
+EFEF  8EF0AC                          ldx #xgetc
+EFF2  9F01                            stx getchar+1   ;
+EFF4  0F2F                            clr lastok
+EFF6  0F30                            clr xcount
+EFF8  8601                            lda #1
+EFFA  972D                            sta xpacknum
+EFFC  4C                              inca
+EFFD  9731                            sta xmode       ;set xmode to 2.
+EFFF  3596                            puls x,a,b,pc
+                      
+                      * O.S. routine to open output through XMODEM transfer.
+F001  3416            xopout          pshs x,a,b
+F003  8DB3                            bsr savevecs
+F005  8EE8ED                          ldx #xrmsg
+F008  BDE507                          jsr outcount    ;Display message to start XMODEM receive
+F00B  9D0C                            jsr putcr
+F00D  8EF073                          ldx #xputc
+F010  9F04                            stx putchar+1
+F012  8EF091                          ldx #xputcr
+F015  9F0D                            stx putcr+1
+F017  BDEEF0                          jsr xsendinit
+F01A  102700B7                        lbeq xerror
+F01E  0F30                            clr xcount
+F020  8601                            lda #1
+F022  9731                            sta xmode
+F024  3596                            puls x,a,b,pc
+                                      
+                      
+                      * O.S. routine to abort input through XMODEM transfer.
+F026  9631            xabtin          lda xmode
+F028  8102                            cmpa #2
+F02A  263C                            bne xclsend
+F02C  BDEF32                          jsr purge
+F02F  C618                            ldb #CAN
+F031  8608                            lda #8
+F033  BDE476          xabtloop        jsr osputc
+F036  4A                              deca
+F037  26FA                            bne xabtloop    ;Send 8 CAN characters to kill transfer.
+F039  8D90                            bsr rstvecs
+F03B  0F31                            clr xmode
+F03D  8EE902                          ldx #xamsg
+F040  BDE507                          jsr outcount
+F043  9D0C                            jsr putcr       ;Send diagnostic message.
+F045  39                              rts             
+                      
+                      * O.S. routine to close output through XMODEM transfer.
+F046  9631            xclsout         lda xmode 
+F048  8101                            cmpa #1
+F04A  261C                            bne xclsend
+F04C  0D30                            tst xcount
+F04E  270C                            beq xclsdone
+F050  8680                            lda #128
+F052  9030                            suba xcount
+F054  F602CA          xclsloop        ldb filler
+F057  8D1A                            bsr xputc   
+F059  4A                              deca
+F05A  26F8                            bne xclsloop    ;Transfer filler chars to force block out.
+F05C  BDEF01          xclsdone        jsr xsendeot    ;Send EOT
+F05F  10270072                        lbeq xerror
+F063  BDEFCB                          jsr rstvecs
+F066  0F31                            clr xmode
+F068  39              xclsend         rts     
+                      
+                      * O.S. routine to close input through XMODEM, by gobbling up the remaining
+                      * bytes.
+F069  D631            xclsin          ldb xmode
+F06B  C102                            cmpb #2
+F06D  26F9                            bne xclsend
+F06F  9D03                            jsr putchar
+F071  20F6                            bra xclsin
+                      
+                      * putchar routine for XMODEM 
+F073  3416            xputc           pshs x,a,b
+F075  9630                            lda xcount
+F077  0C30                            inc xcount
+F079  8E0100                          ldx #buf0
+F07C  E786                            stb a,x         ;Store character in XMODEM buffer.
+F07E  817F                            cmpa #127
+F080  260D                            bne xputc1      ;is buffer full?
+F082  0F30                            clr xcount
+F084  3460                            pshs y,u
+F086  BDEEB4                          jsr xsendbuf
+F089  10270048                        lbeq xerror
+F08D  3560                            puls y,u
+F08F  3596            xputc1          puls x,a,b,pc
+                      
+                      * putcr routine for XMODEM
+F091  3404            xputcr          pshs b
+F093  F602CB                          ldb xmcr
+F096  C502                            bitb #2
+F098  2704                            beq xputcr1
+F09A  C60D                            ldb #CR
+F09C  8DD5                            bsr xputc
+F09E  F602CB          xputcr1         ldb xmcr
+F0A1  C501                            bitb #1
+F0A3  2704                            beq xputcr2
+F0A5  C60A                            ldb #LF
+F0A7  8DCA                            bsr xputc
+F0A9  3504            xputcr2         puls b
+F0AB  39                              rts
+                      
+                      * getchar routine for XMODEM
+F0AC  3412            xgetc           pshs x,a
+F0AE  0D30                            tst xcount      ;No characters left?
+F0B0  260D                            bne xgetc1
+F0B2  3460                            pshs y,u
+F0B4  BDEF3A                          jsr xrcvbuf     ;Receive new block.
+F0B7  3560                            puls y,u
+F0B9  2710                            beq xgetcterm   ;End of input?
+F0BB  8680                            lda #128
+F0BD  9730                            sta xcount
+F0BF  9630            xgetc1          lda xcount
+F0C1  40                              nega
+F0C2  8E0180                          ldx #buf0+128
+F0C5  E686                            ldb a,x         ;Get character from buffer
+F0C7  0A30                            dec xcount
+F0C9  3592                            puls x,a,pc             
+F0CB  BDEFCB          xgetcterm       jsr rstvecs
+F0CE  0F31                            clr xmode
+F0D0  F602CA                          ldb filler
+F0D3  3592                            puls x,a,pc
+                                      
+F0D5  BDEFCB          xerror          jsr rstvecs     ;Restore I/O vectors
+F0D8  0F31                            clr xmode
+F0DA  8EE902                          ldx #xamsg
+F0DD  BDE507                          jsr outcount
+F0E0  9D0C                            jsr putcr
+F0E2  7E0292                          jmp xerrvec
+                              
+F0E5  10FE02CC        xerrhand        lds savesp
+F0E9  7EE581                          jmp cmdline
+                      
+                      * This is the code for the X command, various XMODEM related commands.
+                      * Syntax: XSaddr,len XLaddr,len XX XOcrlf,filler, XSSaddr,len
+F0EC  8E0201          xmodem          ldx #linebuf+1
+F0EF  A680                            lda ,x+
+F0F1  84DF                            anda #CASEMASK  ;Convert to uppercase.
+F0F3  8158                            cmpa #'X'
+F0F5  274A                            beq xeq 
+F0F7  814C                            cmpa #'L'
+F0F9  2733                            beq xload
+F0FB  814F                            cmpa #'O'
+F0FD  2747                            beq xopts
+F0FF  8153                            cmpa #'S'
+F101  1026F4DC                        lbne unk
+F105  A684                            lda ,x
+F107  84DF                            anda #CASEMASK
+F109  8153                            cmpa #'S'
+F10B  271A                            beq xss
+F10D  CC0100                          ldd #$100            ;XSaddr,len command.
+F110  BDE9CF                          jsr scan2parms       ;Send binary through XMODEM
+F113  9D15                            jsr xopenout
+F115  FE02A0                          ldu addr
+F118  10BE02A2                        ldy length
+F11C  E6C0            xsbinloop       ldb ,u+
+F11E  9D03                            jsr putchar
+F120  313F                            leay -1,y
+F122  26F8                            bne xsbinloop        ;Send all the bytes through XMODEM.
+F124  7EE581                          jmp cmdline
+F127  3001            xss             leax 1,x             ;XSSaddr,len command.
+F129  9D15                            jsr xopenout         ;Send Srecords through XMODEM
+F12B  7EED89                          jmp sendrec             
+F12E  BDE9AC          xload           jsr scanhex          ;XLaddr command
+F131  1F02                            tfr d,y              ;Load binary through XMODEM
+F133  9D12                            jsr xopenin
+F135  9D00            xlodloop        jsr getchar
+F137  0D31                            tst xmode            ;File ended? then done
+F139  1027F444                        lbeq cmdline
+F13D  E7A0                            stb ,y+
+F13F  20F4                            bra xlodloop
+F141  9D12            xeq             jsr xopenin          ;XX command
+F143  7EE581                          jmp cmdline          ;Execute commands received from XMODEM
+F146  CC001A          xopts           ldd #$1a
+F149  BDE9CF                          jsr scan2parms
+F14C  B602A1                          lda addr+1
+F14F  B702CB                          sta xmcr
+F152  B602A3                          lda length+1
+F155  B702CA                          sta filler
+F158  7EE581                          jmp cmdline
+                              
+                      * mnemonics table, ordered alphabetically.
+                      * 5 bytes name, 1 byte category, 2 bytes opcode, 8 bytes total.
+F15B  4142582020      mnemtab         fcc "ABX  "
+F160  00                              fcb 0
+F161  003A                            fdb $3a
+F163  4144434120                      fcc "ADCA "
+F168  07                              fcb 7
+F169  0089                            fdb $89
+F16B  4144434220                      fcc "ADCB "
+F170  07                              fcb 7
+F171  00C9                            fdb $c9
+F173  4144444120                      fcc "ADDA "
+F178  07                              fcb 7
+F179  008B                            fdb $8b
+F17B  4144444220                      fcc "ADDB "
+F180  07                              fcb 7
+F181  00CB                            fdb $cb 
+F183  4144444420                      fcc "ADDD "
+F188  08                              fcb 8
+F189  00C3                            fdb $c3
+F18B  414E444120                      fcc "ANDA "
+F190  07                              fcb 7
+F191  0084                            fdb $84
+F193  414E444220                      fcc "ANDB "
+F198  07                              fcb 7
+F199  00C4                            fdb $c4
+F19B  414E444343                      fcc "ANDCC"
+F1A0  02                              fcb 2
+F1A1  001C                            fdb $1c
+F1A3  41534C2020                      fcc "ASL  "
+F1A8  0A                              fcb 10
+F1A9  0008                            fdb $08
+F1AB  41534C4120                      fcc "ASLA "
+F1B0  00                              fcb 0
+F1B1  0048                            fdb $48
+F1B3  41534C4220                      fcc "ASLB "
+F1B8  00                              fcb 0
+F1B9  0058                            fdb $58
+F1BB  4153522020                      fcc "ASR  "
+F1C0  0A                              fcb 10
+F1C1  0007                            fdb $07
+F1C3  4153524120                      fcc "ASRA "
+F1C8  00                              fcb 0
+F1C9  0047                            fdb $47
+F1CB  4153524220                      fcc "ASRB "
+F1D0  00                              fcb 0
+F1D1  0057                            fdb $57
+F1D3  4243432020                      fcc "BCC  "
+F1D8  04                              fcb 4
+F1D9  0024                            fdb $24
+F1DB  4243532020                      fcc "BCS  "
+F1E0  04                              fcb 4 
+F1E1  0025                            fdb $25
+F1E3  4245512020                      fcc "BEQ  "
+F1E8  04                              fcb 4
+F1E9  0027                            fdb $27
+F1EB  4247452020                      fcc "BGE  "
+F1F0  04                              fcb 4
+F1F1  002C                            fdb $2c
+F1F3  4247542020                      fcc "BGT  "
+F1F8  04                              fcb 4
+F1F9  002E                            fdb $2e
+F1FB  4248492020                      fcc "BHI  "
+F200  04                              fcb 4
+F201  0022                            fdb $22
+F203  4248532020                      fcc "BHS  "
+F208  04                              fcb 4
+F209  0024                            fdb $24
+F20B  4249544120                      fcc "BITA "
+F210  07                              fcb 7
+F211  0085                            fdb $85
+F213  4249544220                      fcc "BITB "
+F218  07                              fcb 7
+F219  00C5                            fdb $c5
+F21B  424C452020                      fcc "BLE  "
+F220  04                              fcb 4
+F221  002F                            fdb $2f
+F223  424C4F2020                      fcc "BLO  "
+F228  04                              fcb 4
+F229  0025                            fdb $25
+F22B  424C532020                      fcc "BLS  "
+F230  04                              fcb 4
+F231  0023                            fdb $23
+F233  424C542020                      fcc "BLT  "
+F238  04                              fcb 4
+F239  002D                            fdb $2d
+F23B  424D492020                      fcc "BMI  "
+F240  04                              fcb 4
+F241  002B                            fdb $2b
+F243  424E452020                      fcc "BNE  "
+F248  04                              fcb 4
+F249  0026                            fdb $26
+F24B  42504C2020                      fcc "BPL  "
+F250  04                              fcb 4
+F251  002A                            fdb $2a
+F253  4252412020                      fcc "BRA  "
+F258  04                              fcb 4
+F259  0020                            fdb $20 
+F25B  42524E2020                      fcc "BRN  "
+F260  04                              fcb 4
+F261  0021                            fdb $21
+F263  4253522020      mnembsr         fcc "BSR  "
+F268  04                              fcb 4
+F269  008D                            fdb $8d
+F26B  4256432020                      fcc "BVC  "
+F270  04                              fcb 4
+F271  0028                            fdb $28
+F273  4256532020                      fcc "BVS  "
+F278  04                              fcb 4
+F279  0029                            fdb $29
+F27B  434C522020                      fcc "CLR  "
+F280  0A                              fcb 10
+F281  000F                            fdb $0f
+F283  434C524120                      fcc "CLRA "
+F288  00                              fcb 0
+F289  004F                            fdb $4f
+F28B  434C524220                      fcc "CLRB "
+F290  00                              fcb 0
+F291  005F                            fdb $5f
+F293  434D504120                      fcc "CMPA "
+F298  07                              fcb 7
+F299  0081                            fdb $81
+F29B  434D504220                      fcc "CMPB "
+F2A0  07                              fcb 7
+F2A1  00C1                            fdb $c1
+F2A3  434D504420                      fcc "CMPD "
+F2A8  09                              fcb 9
+F2A9  1083                            fdb $1083
+F2AB  434D505320                      fcc "CMPS "
+F2B0  09                              fcb 9
+F2B1  118C                            fdb $118c
+F2B3  434D505520                      fcc "CMPU "
+F2B8  09                              fcb 9
+F2B9  1183                            fdb $1183
+F2BB  434D505820                      fcc "CMPX "
+F2C0  08                              fcb 8
+F2C1  008C                            fdb $8c
+F2C3  434D505920                      fcc "CMPY "
+F2C8  09                              fcb 9
+F2C9  108C                            fdb $108c
+F2CB  434F4D2020                      fcc "COM  "
+F2D0  0A                              fcb 10
+F2D1  0003                            fdb $03
+F2D3  434F4D4120                      fcc "COMA "
+F2D8  00                              fcb 0
+F2D9  0043                            fdb $43
+F2DB  434F4D4220                      fcc "COMB "
+F2E0  00                              fcb 0
+F2E1  0053                            fdb $53
+F2E3  4357414920                      fcc "CWAI "
+F2E8  02                              fcb 2
+F2E9  003C                            fdb $3c
+F2EB  4441412020                      fcc "DAA  "
+F2F0  00                              fcb 0
+F2F1  0019                            fdb $19
+F2F3  4445432020                      fcc "DEC  "
+F2F8  0A                              fcb 10
+F2F9  000A                            fdb $0a
+F2FB  4445434120                      fcc "DECA "
+F300  00                              fcb 0
+F301  004A                            fdb $4a
+F303  4445434220                      fcc "DECB "
+F308  00                              fcb 0
+F309  005A                            fdb $5a
+F30B  454F524120                      fcc "EORA "
+F310  07                              fcb 7
+F311  0088                            fdb $88
+F313  454F524220                      fcc "EORB "
+F318  07                              fcb 7
+F319  00C8                            fdb $c8
+F31B  4551552020                      fcc "EQU  "
+F320  0D                              fcb 13
+F321  0000                            fdb 0
+F323  4558472020                      fcc "EXG  "
+F328  0B                              fcb 11
+F329  001E                            fdb $1e
+F32B  4643422020      mnemfcb         fcc "FCB  "
+F330  0D                              fcb 13
+F331  0001                            fdb 1
+F333  4643432020                      fcc "FCC  "
+F338  0D                              fcb 13
+F339  0002                            fdb 2
+F33B  4644422020                      fcc "FDB  "
+F340  0D                              fcb 13
+F341  0003                            fdb 3
+F343  494E432020                      fcc "INC  "
+F348  0A                              fcb 10
+F349  000C                            fdb $0c
+F34B  494E434120                      fcc "INCA "
+F350  00                              fcb 0
+F351  004C                            fdb $4c
+F353  494E434220                      fcc "INCB "
+F358  00                              fcb 0
+F359  005C                            fdb $5c
+F35B  4A4D502020                      fcc "JMP  "
+F360  0A                              fcb 10
+F361  000E                            fdb $0e
+F363  4A53522020      mnemjsr         fcc "JSR  "
+F368  08                              fcb 8
+F369  008D                            fdb $8d
+F36B  4C42434320                      fcc "LBCC "
+F370  05                              fcb 5
+F371  1024                            fdb $1024
+F373  4C42435320                      fcc "LBCS "
+F378  05                              fcb 5
+F379  1025                            fdb $1025
+F37B  4C42455120                      fcc "LBEQ "
+F380  05                              fcb 5
+F381  1027                            fdb $1027
+F383  4C42474520                      fcc "LBGE "
+F388  05                              fcb 5
+F389  102C                            fdb $102c
+F38B  4C42475420                      fcc "LBGT "
+F390  05                              fcb 5
+F391  102E                            fdb $102e
+F393  4C42484920                      fcc "LBHI "
+F398  05                              fcb 5
+F399  1022                            fdb $1022
+F39B  4C42485320                      fcc "LBHS "
+F3A0  05                              fcb 5
+F3A1  1024                            fdb $1024
+F3A3  4C424C4520                      fcc "LBLE "
+F3A8  05                              fcb 5
+F3A9  102F                            fdb $102f
+F3AB  4C424C4F20                      fcc "LBLO "
+F3B0  05                              fcb 5
+F3B1  1025                            fdb $1025
+F3B3  4C424C5320                      fcc "LBLS "
+F3B8  05                              fcb 5
+F3B9  1023                            fdb $1023
+F3BB  4C424C5420                      fcc "LBLT "
+F3C0  05                              fcb 5
+F3C1  102D                            fdb $102d
+F3C3  4C424D4920                      fcc "LBMI "
+F3C8  05                              fcb 5
+F3C9  102B                            fdb $102b
+F3CB  4C424E4520                      fcc "LBNE "
+F3D0  05                              fcb 5
+F3D1  1026                            fdb $1026
+F3D3  4C42504C20                      fcc "LBPL "
+F3D8  05                              fcb 5
+F3D9  102A                            fdb $102a
+F3DB  4C42524120                      fcc "LBRA "
+F3E0  06                              fcb 6
+F3E1  0016                            fdb $16
+F3E3  4C42524E20                      fcc "LBRN "
+F3E8  05                              fcb 5
+F3E9  1021                            fdb $1021
+F3EB  4C42535220                      fcc "LBSR "
+F3F0  06                              fcb 6
+F3F1  0017                            fdb $17
+F3F3  4C42564320                      fcc "LBVC "
+F3F8  05                              fcb 5
+F3F9  1028                            fdb $1028
+F3FB  4C42565320                      fcc "LBVS "
+F400  05                              fcb 5
+F401  1029                            fdb $1029
+F403  4C44412020                      fcc "LDA  "
+F408  07                              fcb 7
+F409  0086                            fdb $86
+F40B  4C44422020                      fcc "LDB  "
+F410  07                              fcb 7
+F411  00C6                            fdb $c6
+F413  4C44442020                      fcc "LDD  "
+F418  08                              fcb 8
+F419  00CC                            fdb $cc
+F41B  4C44532020                      fcc "LDS  "
+F420  09                              fcb 9
+F421  10CE                            fdb $10ce
+F423  4C44552020                      fcc "LDU  "
+F428  08                              fcb 8
+F429  00CE                            fdb $ce
+F42B  4C44582020                      fcc "LDX  "
+F430  08                              fcb 8
+F431  008E                            fdb $8e
+F433  4C44592020                      fcc "LDY  "
+F438  09                              fcb 9
+F439  108E                            fdb $108e
+F43B  4C45415320                      fcc "LEAS "
+F440  03                              fcb 3
+F441  0032                            fdb $32
+F443  4C45415520                      fcc "LEAU "
+F448  03                              fcb 3
+F449  0033                            fdb $33
+F44B  4C45415820                      fcc "LEAX "
+F450  03                              fcb 3
+F451  0030                            fdb $30
+F453  4C45415920                      fcc "LEAY "
+F458  03                              fcb 3
+F459  0031                            fdb $31
+F45B  4C534C2020                      fcc "LSL  "
+F460  0A                              fcb 10
+F461  0008                            fdb $08
+F463  4C534C4120                      fcc "LSLA "
+F468  00                              fcb 0
+F469  0048                            fdb $48
+F46B  4C534C4220                      fcc "LSLB "
+F470  00                              fcb 0
+F471  0058                            fdb $58
+F473  4C53522020                      fcc "LSR  "
+F478  0A                              fcb 10
+F479  0004                            fdb $04
+F47B  4C53524120                      fcc "LSRA "
+F480  00                              fcb 0
+F481  0044                            fdb $44
+F483  4C53524220                      fcc "LSRB "
+F488  00                              fcb 0
+F489  0054                            fdb $54
+F48B  4D554C2020                      fcc "MUL  "
+F490  00                              fcb 0
+F491  003D                            fdb $3d
+F493  4E45472020                      fcc "NEG  "
+F498  0A                              fcb 10
+F499  0000                            fdb $00
+F49B  4E45474120                      fcc "NEGA "
+F4A0  00                              fcb 0
+F4A1  0040                            fdb $40
+F4A3  4E45474220                      fcc "NEGB "
+F4A8  00                              fcb 0
+F4A9  0050                            fdb $50
+F4AB  4E4F502020                      fcc "NOP  "
+F4B0  00                              fcb 0
+F4B1  0012                            fdb $12
+F4B3  4F52412020                      fcc "ORA  "
+F4B8  07                              fcb 7
+F4B9  008A                            fdb $8a
+F4BB  4F52422020                      fcc "ORB  "
+F4C0  07                              fcb 7
+F4C1  00CA                            fdb $ca
+F4C3  4F52434320                      fcc "ORCC "
+F4C8  02                              fcb 2
+F4C9  001A                            fdb $1a
+F4CB  4F52472020                      fcc "ORG  "
+F4D0  0D                              fcb 13
+F4D1  0004                            fdb 4
+F4D3  5053485320                      fcc "PSHS "
+F4D8  0C                              fcb 12
+F4D9  0034                            fdb $34
+F4DB  5053485520                      fcc "PSHU "
+F4E0  0C                              fcb 12
+F4E1  0036                            fdb $36
+F4E3  50554C5320                      fcc "PULS "
+F4E8  0C                              fcb 12
+F4E9  0035                            fdb $35
+F4EB  50554C5520                      fcc "PULU "
+F4F0  0C                              fcb 12
+F4F1  0037                            fdb $37
+F4F3  524D422020                      fcc "RMB  "
+F4F8  0D                              fcb 13
+F4F9  0005                            fdb 5
+F4FB  524F4C2020                      fcc "ROL  "
+F500  0A                              fcb 10
+F501  0009                            fdb $09
+F503  524F4C4120                      fcc "ROLA "
+F508  00                              fcb 0
+F509  0049                            fdb $49
+F50B  524F4C4220                      fcc "ROLB "
+F510  00                              fcb 0
+F511  0059                            fdb $59
+F513  524F522020                      fcc "ROR  "
+F518  0A                              fcb 10
+F519  0006                            fdb $06
+F51B  524F524120                      fcc "RORA "
+F520  00                              fcb 0
+F521  0046                            fdb $46
+F523  524F524220                      fcc "RORB "
+F528  00                              fcb 0
+F529  0056                            fdb $56
+F52B  5254492020                      fcc "RTI  "
+F530  00                              fcb 0
+F531  003B                            fdb $3b
+F533  5254532020                      fcc "RTS  "
+F538  00                              fcb 0
+F539  0039                            fdb $39
+F53B  5342434120                      fcc "SBCA "
+F540  07                              fcb 7
+F541  0082                            fdb $82
+F543  5342434220                      fcc "SBCB "
+F548  07                              fcb 7
+F549  00C2                            fdb $c2
+F54B  5345542020                      fcc "SET  "
+F550  0D                              fcb 13
+F551  0006                            fdb 6
+F553  5345544450                      fcc "SETDP"
+F558  0D                              fcb 13
+F559  0007                            fdb 7
+F55B  5345582020                      fcc "SEX  "
+F560  00                              fcb 0
+F561  001D                            fdb $1d
+F563  5354412020                      fcc "STA  "
+F568  07                              fcb 7
+F569  0087                            fdb $87
+F56B  5354422020                      fcc "STB  "
+F570  07                              fcb 7
+F571  00C7                            fdb $c7
+F573  5354442020                      fcc "STD  "
+F578  08                              fcb 8
+F579  00CD                            fdb $cd
+F57B  5354532020                      fcc "STS  "
+F580  09                              fcb 9
+F581  10CF                            fdb $10cf
+F583  5354552020                      fcc "STU  "
+F588  08                              fcb 8
+F589  00CF                            fdb $cf
+F58B  5354582020                      fcc "STX  "
+F590  08                              fcb 8
+F591  008F                            fdb $8f
+F593  5354592020                      fcc "STY  "
+F598  09                              fcb 9
+F599  108F                            fdb $108f
+F59B  5355424120                      fcc "SUBA "
+F5A0  07                              fcb 7
+F5A1  0080                            fdb $80
+F5A3  5355424220                      fcc "SUBB "
+F5A8  07                              fcb 7
+F5A9  00C0                            fdb $c0 
+F5AB  5355424420                      fcc "SUBD "
+F5B0  08                              fcb 8
+F5B1  0083                            fdb $83
+F5B3  5357492020                      fcc "SWI  "
+F5B8  00                              fcb 0
+F5B9  003F                            fdb $3f
+F5BB  5357493220                      fcb "SWI2 "
+F5C0  01                              fcb 1
+F5C1  103F                            fdb $103f
+F5C3  5357493320                      fcb "SWI3 "
+F5C8  01                              fcb 1
+F5C9  113F                            fdb $113f
+F5CB  53594E4320                      fcc "SYNC "
+F5D0  00                              fcb 0
+F5D1  0013                            fdb $13
+F5D3  5446522020                      fcc "TFR  "
+F5D8  0B                              fcb 11
+F5D9  001F                            fdb $1f
+F5DB  5453542020                      fcc "TST  "
+F5E0  0A                              fcb 10
+F5E1  000D                            fdb $0d
+F5E3  5453544120                      fcc "TSTA "
+F5E8  00                              fcb 0
+F5E9  004D                            fdb $4d
+F5EB  5453544220                      fcc "TSTB "
+F5F0  00                              fcb 0
+F5F1  005D                            fdb $5d
+                      
+0093                  mnemsize        equ (*-mnemtab)/8
+                      
+                      * Register table for PUSH/PULL and TFR/EXG instructions.
+                      * 3 bytes for name, 1 for tfr/exg, 1 for push/pull, 5 total 
+F5F3  582020          asmregtab       fcc "X  "
+F5F6  0110                            fcb $01,$10
+F5F8  592020                          fcc "Y  "
+F5FB  0220                            fcb $02,$20
+F5FD  552020          aregu           fcc "U  "
+F600  0340                            fcb $03,$40
+F602  532020          aregs           fcc "S  "
+F605  0440                            fcb $04,$40
+F607  504320                          fcc "PC "
+F60A  0580                            fcb $05,$80
+F60C  412020                          fcc "A  "
+F60F  0802                            fcb $08,$02
+F611  422020                          fcc "B  "
+F614  0904                            fcb $09,$04
+F616  442020                          fcc "D  "
+F619  0006                            fcb $00,$06
+F61B  434320                          fcc "CC "
+F61E  0A01                            fcb $0a,$01
+F620  434352                          fcc "CCR"
+F623  0A01                            fcb $0a,$01
+F625  445020                          fcc "DP "
+F628  0B08                            fcb $0b,$08
+F62A  445052                          fcc "DPR"
+F62D  0B08                            fcb $0b,$08
+F62F  3F2020          reginval        fcc "?  "
+                      
+F632  58595553        ixregs          fcc "XYUS"
+                      
+                      * opcode offsets to basic opcode, depends on first nibble. 
+F636  000000000000A090 opcoffs         fcb 0,0,0,0,0,0,-$60,-$70
+F63E  00F0E0D000F0E0D0                 fcb 0,-$10,-$20,-$30,0,-$10,-$20,-$30
+                      * mode depending on first nibble of opcode.
+F646  03000000000005040103050401030504 modetab         fcb 3,0,0,0,0,0,5,4,1,3,5,4,1,3,5,4
+                      * mode depending on category code stored in mnemtab
+F656  00000105060707010202000809 modetab2        fcb 0,0,1,5,6,7,7,1,2,2,0,8,9
+                      * modes in this context: 0 no operands, 1 8-bit immediate, 2 16 bit imm,
+                      * 3, 8-bit address, 4 16 bit address, 5 indexed with postbyte, 6 short
+                      * relative, 7 long relative, 8 pushpul, 9 tftetx
+                      
+                      * Decode instruction pointed to by Y for disassembly (and to find out
+                      * how long it is). On return, U points to appropriate mnemonic table entry,
+                      * Y points past instruction. 
+                      * It's rather clumsy code, but we do want to reuse the same table
+                      * as used with assembling.
+F663  7F02D0          disdecode       clr prebyte
+F666  7F02D4                          clr amode
+F669  A6A0                            lda ,y+
+F66B  8110                            cmpa #$10
+F66D  2704                            beq ddec1
+F66F  8111                            cmpa #$11
+F671  2605                            bne ddec2
+F673  B702D0          ddec1           sta prebyte         ;Store $10 or $11 prebyte.
+F676  A6A0                            lda ,y+             ;Get new opcode.
+F678  B702D2          ddec2           sta opcode
+F67B  44                              lsra
+F67C  44                              lsra
+F67D  44                              lsra
+F67E  44                              lsra                ;Get high nibble.
+F67F  8EF646                          ldx #modetab
+F682  E686                            ldb a,x
+F684  F702D4                          stb amode
+F687  8EF636                          ldx #opcoffs
+F68A  A686                            lda a,x
+F68C  BB02D2                          adda opcode         ;Add opcode offset to opcode.
+F68F  B702D1          ddec4           sta opc1            ;Store the 'basis' opcode.
+F692  CEF15B                          ldu #mnemtab
+F695  8E0093                          ldx #mnemsize
+F698  C60D            ddecloop        ldb #13
+F69A  E145                            cmpb 5,u            ;Compare category code with 13
+F69C  2708                            beq ddec3           ;13=pseudo op, no valid opcode
+F69E  FC02D0                          ldd prebyte
+F6A1  10A346                          cmpd 6,u
+F6A4  2722                            beq ddecfound       ;Opcode&prebyte agree, operation found.
+F6A6  3348            ddec3           leau 8,u            ;point to next mnemonic
+F6A8  301F                            leax -1,x
+F6AA  26EC                            bne ddecloop        
+F6AC  CEF32B                          ldu #mnemfcb        ;mnemonic not found, use FCB byte.
+F6AF  8603                            lda #3
+F6B1  B702D4                          sta amode           ;Store mode 3, 8 bit address.
+F6B4  B602D2                          lda opcode
+F6B7  7D02D0                          tst prebyte
+F6BA  2708                            beq ddec5
+F6BC  B602D0                          lda prebyte         ;if it was the combination prebyte
+F6BF  7F02D0                          clr prebyte         ;and opcode that was not found,
+F6C2  313F                            leay -1,y           ;FCB just the prebyte
+F6C4  B702D6          ddec5           sta operand+1       ;The byte must be stored as operand.
+F6C7  39                              rts
+F6C8  1183F263        ddecfound       cmpu #mnembsr
+F6CC  260A                            bne ddec6
+F6CE  868D                            lda #$8d            ;Is it really the BSR opcode?
+F6D0  B102D2                          cmpa opcode
+F6D3  2703                            beq ddec6
+F6D5  CEF363                          ldu #mnemjsr        ;We mistakenly found BSR instead of JSR
+F6D8  B602D4          ddec6           lda amode
+F6DB  84FE                            anda #$FE
+F6DD  260A                            bne ddec7
+F6DF  A645                            lda 5,u             ;nibble-dependent mode was 0 or 1,
+F6E1  8EF656                          ldx #modetab2       ;use category dependent mode instead.
+F6E4  A686                            lda a,x
+F6E6  B702D4                          sta amode
+F6E9  B602D4          ddec7           lda amode
+F6EC  48                              asla
+F6ED  8EF6F2                          ldx #disdectab
+F6F0  6E96                            jmp [a,x]           ;jump dependent on definitive mode.
+F6F2  F72CF726F72DF726F72DF737 disdectab       fdb noop,opdec1,opdec2,opdec1,opdec2,opdecidx
+F6FE  F726F72DF731F731                 fdb opdec1,opdec2,opdecpb,opdecpb
+F706  F72CF72CF72CF72CF72CF72CF72CF72C disdectab1      fdb noop,noop,noop,noop,noop,noop,noop,noop
+F716  F726F72DF72CF72CF726F72DF72CF72D                 fdb opdec1,opdec2,noop,noop,opdec1,opdec2,noop,opdec2
+F726  E6A0            opdec1          ldb ,y+
+F728  1D                              sex
+F729  FD02D5          od1a            std operand
+F72C  39              noop            rts 
+F72D  ECA1            opdec2          ldd ,y++
+F72F  20F8                            bra od1a
+F731  E6A0            opdecpb         ldb ,y+
+F733  F702D3          odpa            stb postbyte
+F736  39                              rts
+F737  E6A0            opdecidx        ldb ,y+
+F739  2AF8                            bpl odpa        ;postbytes <$80 have no extra operands.
+F73B  F702D3                          stb postbyte    
+F73E  C40F                            andb #$0f
+F740  58                              aslb
+F741  8EF706                          ldx #disdectab1
+F744  6E95                            jmp [b,x]
+                      
+                      * Display disassembled instruction after the invocation of disdecode.
+                      * U points to mnemonic table entry.
+F746  1F31            disdisp         tfr u,x
+F748  C605                            ldb #5
+F74A  9D09                            jsr putline      ;Display the mnemonic.
+F74C  C620                            ldb #' '
+F74E  9D03                            jsr putchar
+F750  B602D4                          lda amode
+F753  48                              asla
+F754  8EF759                          ldx #disdisptab
+F757  6E96                            jmp [a,x]        ;Perform action dependent on mode.
+F759  F72CF76DF771F77BF773 disdisptab      fdb noop,disim8,disim16,disadr8,disadr16
+F763  F833F783F791F7F1F7A8                 fdb disidx,disrel8,disrel16,distfr,dispush
+F76D  8D29            disim8          bsr puthash
+F76F  200A                            bra disadr8
+F771  8D25            disim16         bsr puthash
+F773  8D27            disadr16        bsr putdol
+F775  FC02D5                          ldd operand
+F778  7EE97B                          jmp outd
+F77B  8D1F            disadr8         bsr putdol
+F77D  B602D6                          lda operand+1
+F780  7EE96D                          jmp outbyte
+F783  8D17            disrel8         bsr putdol
+F785  F602D6                          ldb operand+1
+F788  1D                              sex
+F789  109F24          dr8a            sty temp
+F78C  D324                            addd temp
+F78E  7EE97B                          jmp outd
+F791  8D09            disrel16        bsr putdol
+F793  FC02D5                          ldd operand
+F796  20F1                            bra dr8a
+                                      
+F798  C623            puthash         ldb #'#'
+F79A  0E03                            jmp putchar
+F79C  C624            putdol          ldb #'$'
+F79E  0E03                            jmp putchar
+F7A0  C62C            putcomma        ldb #','
+F7A2  0E03                            jmp putchar
+F7A4  C620            putspace        ldb #' '
+F7A6  0E03                            jmp putchar
+                      
+F7A8  C60C            dispush         ldb #12
+F7AA  8EF5F3                          ldx #asmregtab  ;Walk through the register table.
+F7AD  0F24                            clr temp
+F7AF  B602D3          regloop         lda postbyte
+F7B2  A404                            anda 4,x
+F7B4  2735                            beq dispush1    ;Is bit corresponding to reg set in postbyte
+F7B6  8CF5FD                          cmpx #aregu
+F7B9  260B                            bne dispush3
+F7BB  9725                            sta temp+1
+F7BD  B602D2                          lda opcode
+F7C0  8402                            anda #2
+F7C2  2627                            bne dispush1    ;no u register in pshu pulu.
+F7C4  9625                            lda temp+1
+F7C6  8CF602          dispush3        cmpx #aregs
+F7C9  260B                            bne dispush4
+F7CB  9725                            sta temp+1
+F7CD  B602D2                          lda opcode
+F7D0  8402                            anda #2
+F7D2  2717                            beq dispush1   ;no s register in pshs puls.
+F7D4  9625                            lda temp+1
+F7D6  43              dispush4        coma
+F7D7  B402D3                          anda postbyte   ;remove the bits from postbyte.
+F7DA  B702D3                          sta postbyte
+F7DD  3404                            pshs b
+F7DF  0D24                            tst temp
+F7E1  2702                            beq dispush2
+F7E3  8DBB                            bsr putcomma    ;print comma after first register.
+F7E5  8D2B            dispush2        bsr disregname
+F7E7  0C24                            inc temp
+F7E9  3504                            puls b
+F7EB  3005            dispush1        leax 5,x
+F7ED  5A                              decb
+F7EE  26BF                            bne regloop
+F7F0  39                              rts
+                      
+F7F1  B602D3          distfr          lda postbyte
+F7F4  44                              lsra
+F7F5  44                              lsra
+F7F6  44                              lsra
+F7F7  44                              lsra
+F7F8  8D07                            bsr distfrsub
+F7FA  8DA4                            bsr putcomma
+F7FC  B602D3                          lda postbyte
+F7FF  840F                            anda #$0f
+F801  C60C            distfrsub       ldb #12
+F803  8EF5F3                          ldx #asmregtab
+F806  A103            distfrloop      cmpa 3,x
+F808  2705                            beq distfrend
+F80A  3005                            leax 5,x
+F80C  5A                              decb
+F80D  26F7                            bne distfrloop
+F80F  8D01            distfrend       bsr disregname
+F811  39                              rts
+                      
+F812  8603            disregname      lda #3
+F814  1F13                            tfr x,u
+F816  E6C0            drnloop         ldb ,u+
+F818  C120                            cmpb #' '
+F81A  2705                            beq drnend
+F81C  9D03                            jsr putchar
+F81E  4A                              deca
+F81F  26F5                            bne drnloop
+F821  39              drnend          rts
+                      
+F822  B602D3          disidxreg       lda postbyte
+F825  44                              lsra
+F826  44                              lsra
+F827  44                              lsra
+F828  44                              lsra
+F829  44                              lsra
+F82A  8403                            anda #3
+F82C  8EF632                          ldx #ixregs
+F82F  E686                            ldb a,x
+F831  0E03                            jmp putchar
+                      
+F833  0F24            disidx          clr temp
+F835  B602D3                          lda postbyte
+F838  2B23                            bmi disidx1
+F83A  841F                            anda #$1f
+F83C  8510                            bita #$10
+F83E  2605                            bne negoffs
+F840  BDF92C                          jsr outdecbyte
+F843  200A                            bra discomma
+F845  C62D            negoffs         ldb #'-'
+F847  9D03                            jsr putchar
+F849  8AF0                            ora #$f0
+F84B  40                              nega
+F84C  BDF92C                          jsr outdecbyte
+F84F  BDF7A0          discomma        jsr putcomma         ;Display ,Xreg and terminating ]
+F852  8DCE            disindex        bsr disidxreg
+F854  0D24            disindir        tst temp             ;Display ] if indirect.
+F856  2704                            beq disidxend      
+F858  C65D                            ldb #']'       
+F85A  9D03                            jsr putchar
+F85C  39              disidxend       rts
+F85D  8510            disidx1         bita #$10
+F85F  2706                            beq disidx2
+F861  C65B                            ldb #'['
+F863  9D03                            jsr putchar
+F865  0C24                            inc temp
+F867  B602D3          disidx2         lda postbyte
+F86A  840F                            anda #$0f
+F86C  48                              asla
+F86D  8EF90C                          ldx #disidxtab
+F870  6E96                            jmp [a,x]            ;Jump to routine for indexed mode
+F872  8602            disadec2        lda #2
+F874  2002                            bra disadeca
+F876  8601            disadec1        lda #1
+F878  BDF7A0          disadeca        jsr putcomma
+F87B  C62D            disadloop       ldb #'-'
+F87D  9D03                            jsr putchar
+F87F  4A                              deca
+F880  26F9                            bne disadloop
+F882  20CE                            bra disindex
+F884  8602            disainc2        lda #2
+F886  2002                            bra disainca
+F888  8601            disainc1        lda #1
+F88A  9725            disainca        sta temp+1
+F88C  BDF7A0                          jsr putcomma
+F88F  BDF822                          jsr disidxreg
+F892  9625                            lda temp+1
+F894  C62B            disailoop       ldb #'+'
+F896  9D03                            jsr putchar
+F898  4A                              deca
+F899  26F9                            bne disailoop
+F89B  7EF854                          jmp disindir
+F89E  C641            disax           ldb #'A'
+F8A0  9D03                            jsr putchar
+F8A2  7EF84F                          jmp discomma
+F8A5  C642            disbx           ldb #'B'
+F8A7  9D03                            jsr putchar
+F8A9  7EF84F                          jmp discomma
+F8AC  C644            disdx           ldb #'D'
+F8AE  9D03                            jsr putchar
+F8B0  7EF84F                          jmp discomma
+F8B3  C63F            disinval        ldb #'?'
+F8B5  9D03                            jsr putchar
+F8B7  7EF854                          jmp disindir
+F8BA  B602D6          disnx           lda operand+1
+F8BD  2B09                            bmi disnxneg
+F8BF  BDF79C          disnx1          jsr putdol
+F8C2  BDE96D                          jsr outbyte
+F8C5  7EF84F                          jmp discomma
+F8C8  C62D            disnxneg        ldb #'-'
+F8CA  9D03                            jsr putchar
+F8CC  40                              nega
+F8CD  20F0                            bra disnx1
+F8CF  BDF79C          disnnx          jsr putdol
+F8D2  FC02D5                          ldd operand
+F8D5  BDE97B                          jsr outd
+F8D8  7EF84F                          jmp discomma
+F8DB  BDF79C          disnpc          jsr putdol
+F8DE  F602D6                          ldb operand+1
+F8E1  1D                              sex
+F8E2  109F26          disnpca         sty temp2
+F8E5  D326                            addd temp2
+F8E7  BDE97B                          jsr outd
+F8EA  8EF908                          ldx #commapc
+F8ED  C604                            ldb #4
+F8EF  9D09                            jsr putline
+F8F1  7EF854                          jmp disindir
+F8F4  BDF79C          disnnpc         jsr putdol
+F8F7  FC02D5                          ldd operand
+F8FA  20E6                            bra disnpca
+F8FC  BDF79C          disdirect       jsr putdol
+F8FF  FC02D5                          ldd operand
+F902  BDE97B                          jsr outd
+F905  7EF854                          jmp disindir
+                      
+F908  2C504352        commapc         fcc ",PCR"
+                      
+F90C  F888F884F876F872 disidxtab       fdb disainc1,disainc2,disadec1,disadec2
+F914  F84FF8A5F89EF8B3                 fdb discomma,disbx,disax,disinval
+F91C  F8BAF8CFF8B3F8AC                 fdb disnx,disnnx,disinval,disdx
+F924  F8DBF8F4F8B3F8FC                 fdb disnpc,disnnpc,disinval,disdirect
+                      
+                      * Display byte A in decimal (0<=A<20)
+F92C  810A            outdecbyte      cmpa #10
+F92E  2506                            blo odb1
+F930  800A                            suba #10
+F932  C631                            ldb #'1'
+F934  9D03                            jsr putchar
+F936  8B30            odb1            adda #'0'
+F938  1F89                            tfr a,b
+F93A  0E03                            jmp putchar
+                                      
+                      * This is the code for the U command, unassemble instructions in memory.
+                      * Syntax: U or Uaddr or Uaddr,length
+F93C  8D03            unasm           bsr disasm
+F93E  7EE581                          jmp cmdline
+F941  8E0201          disasm          ldx #linebuf+1
+F944  CC0014                          ldd #20
+F947  BDE9CF                          jsr scan2parms  ;Scan address,length parameters.
+F94A  FC02A0          dis1            ldd addr
+F94D  F302A2                          addd length
+F950  FD02A2                          std length
+F953  10BE02A0                        ldy addr
+F957  1F20            unasmloop       tfr y,d
+F959  BDE97B                          jsr outd        ;Display instruction address
+F95C  BDF7A4                          jsr putspace
+F95F  3420                            pshs y
+F961  BDF663                          jsr disdecode
+F964  3510                            puls x
+F966  109F24                          sty temp
+F969  0F26                            clr temp2
+F96B  A680            unadishex       lda ,x+
+F96D  BDE96D                          jsr outbyte
+F970  0C26                            inc temp2
+F972  0C26                            inc temp2
+F974  9C24                            cmpx temp
+F976  26F3                            bne unadishex  ;Display instruction bytes as hex.
+F978  C620            unadisspc       ldb #' '
+F97A  9D03                            jsr putchar
+F97C  0C26                            inc temp2
+F97E  860B                            lda #11
+F980  9126                            cmpa temp2     ;Fill out with spaces to width 11.
+F982  26F4                            bne unadisspc
+F984  26E5                            bne unadishex
+F986  BDF746                          jsr disdisp    ;Display disassembled instruction.
+F989  0D32                            tst disflg
+F98B  2602                            bne skipcr
+F98D  9D0C                            jsr putcr
+F98F  10BC02A2        skipcr          cmpy length
+F993  23C2                            bls unasmloop
+F995  10BF02A0                        sty addr
+F999  39                              rts
+                      
+                      * Simple 'expression evaluator' for assembler.
+F99A  E684            expr            ldb ,x
+F99C  C12D                            cmpb #'-'
+F99E  2603                            bne pos
+F9A0  5F                              clrb
+F9A1  3001                            leax 1,x
+F9A3  3404            pos             pshs b
+F9A5  8D11                            bsr scanfact
+F9A7  270C                            beq exprend1
+F9A9  6DE0                            tst ,s+
+F9AB  2607                            bne exprend     ;Was the minus sign there.
+F9AD  43                              coma
+F9AE  53                              comb
+F9AF  C30001                          addd #1
+F9B2  1CFB                            andcc #$fb      ;Clear Z flag for valid result.
+F9B4  39              exprend         rts
+F9B5  3504            exprend1        puls b
+F9B7  39                              rts
+                      
+F9B8  E680            scanfact        ldb ,x+
+F9BA  C124                            cmpb #'$'
+F9BC  1027EFEC                        lbeq scanhex   ;Hex number if starting with dollar.
+F9C0  C127                            cmpb #'''
+F9C2  260E                            bne scandec    ;char if starting with ' else decimal
+F9C4  E680                            ldb ,x+
+F9C6  A684                            lda ,x
+F9C8  8127                            cmpa #'''
+F9CA  2602                            bne scanchar2
+F9CC  3001                            leax 1,x       ;Increment past final quote if it's there.
+F9CE  4F              scanchar2       clra
+F9CF  1CFB                            andcc #$fb     ;Clear zero flag.
+F9D1  39                              rts
+F9D2  C130            scandec         cmpb #'0'
+F9D4  252F                            blo noexpr
+F9D6  C139                            cmpb #'9'
+F9D8  222B                            bhi noexpr
+F9DA  0F24                            clr temp
+F9DC  0F25                            clr temp+1
+F9DE  C030            scandloop       subb #'0'
+F9E0  251C                            bcs sdexit
+F9E2  C10A                            cmpb #10
+F9E4  2418                            bcc sdexit
+F9E6  3404                            pshs b
+F9E8  DC24                            ldd temp
+F9EA  58                              aslb
+F9EB  49                              rola
+F9EC  3406                            pshs d
+F9EE  58                              aslb
+F9EF  49                              rola
+F9F0  58                              aslb
+F9F1  49                              rola
+F9F2  E3E1                            addd ,s++     ;Multiply number by 10.
+F9F4  EBE0                            addb ,s+
+F9F6  8900                            adca #0       ;Add digit to 10.
+F9F8  DD24                            std temp
+F9FA  E680                            ldb ,x+       ;Get next character.
+F9FC  20E0                            bra scandloop
+F9FE  DC24            sdexit          ldd temp
+FA00  301F                            leax -1,x
+FA02  1CFB                            andcc #$fb
+FA04  39                              rts
+FA05  1A04            noexpr          orcc #$04
+FA07  39                              rts     
+                      
+                      * Assemble the instruction pointed to by X.
+                      * Fisrt stage: copy mnemonic to mnemonic buffer.
+FA08  8605            asminstr        lda #5
+FA0A  CE02D7                          ldu #mnembuf
+FA0D  E680            mncploop        ldb ,x+
+FA0F  2715                            beq mncpexit
+FA11  C120                            cmpb #' '
+FA13  2711                            beq mncpexit    ;Mnemonic ends at first space or null
+FA15  C4DF                            andb #CASEMASK
+FA17  C141                            cmpb #'A'
+FA19  2504                            blo nolet
+FA1B  C15A                            cmpb #'Z'
+FA1D  2302                            bls mnemcp1     ;Capitalize letters, but only letters.
+FA1F  E61F            nolet           ldb -1,x
+FA21  E7C0            mnemcp1         stb ,u+         ;Copy to mnemonic buffer.
+FA23  4A                              deca
+FA24  26E7                            bne mncploop
+FA26  4D              mncpexit        tsta
+FA27  2707                            beq mncpdone
+FA29  C620                            ldb #' '
+FA2B  E7C0            mnfilloop       stb ,u+
+FA2D  4A                              deca
+FA2E  26FB                            bne mnfilloop   ;Fill the rest of mnem buffer with spaces.
+                      * Second stage: look mnemonic up using binary search.
+FA30  9F28            mncpdone        stx temp3
+FA32  0F24                            clr temp        ;Low index=0
+FA34  8693                            lda #mnemsize
+FA36  9725                            sta temp+1      ;High index=mnemsize.
+FA38  D625            bsrchloop       ldb temp+1
+FA3A  C1FF                            cmpb #$ff
+FA3C  2739                            beq invmnem     ;lower limit -1?
+FA3E  D124                            cmpb temp
+FA40  2535                            blo invmnem     ;hi index lower than low index?
+FA42  4F                              clra
+FA43  DB24                            addb temp       ;Add indexes.
+FA45  8900                            adca #0
+FA47  44                              lsra
+FA48  56                              rorb            ;Divide by 2 to get average
+FA49  D726                            stb temp2
+FA4B  58                              aslb
+FA4C  49                              rola
+FA4D  58                              aslb
+FA4E  49                              rola
+FA4F  58                              aslb
+FA50  49                              rola            ;Multiply by 8 to get offset.
+FA51  CEF15B                          ldu #mnemtab
+FA54  33CB                            leau d,u        ;Add offset to table base
+FA56  1F32                            tfr u,y
+FA58  8605                            lda #5
+FA5A  8E02D7                          ldx #mnembuf
+FA5D  E680            bscmploop       ldb ,x+
+FA5F  E1A0                            cmpb ,y+
+FA61  2606                            bne bscmpexit   ;Characters don't match?
+FA63  4A                              deca
+FA64  26F7                            bne bscmploop
+FA66  7EFA7D                          jmp mnemfound   ;We found the mnemonic.
+FA69  D626            bscmpexit       ldb temp2
+FA6B  2405                            bcc bscmplower
+FA6D  5A                              decb
+FA6E  D725                            stb temp+1      ;mnembuf<table, adjust high limit.
+FA70  20C6                            bra bsrchloop
+FA72  5C              bscmplower      incb
+FA73  D724                            stb temp        ;mnembuf>table, adjust low limit.
+FA75  20C1                            bra bsrchloop
+FA77  8EE91A          invmnem         ldx #invmmsg
+FA7A  7E0298                          jmp asmerrvec
+                      * Stage 3: Perform routine depending on category code.
+FA7D  7F02DD          mnemfound       clr uncert
+FA80  10BE02A0                        ldy addr
+FA84  A645                            lda 5,u
+FA86  48                              asla
+FA87  8EFA91                          ldx #asmtab
+FA8A  AD96                            jsr [a,x]
+FA8C  10BF02A0                        sty addr
+FA90  39                              rts
+FA91  FAB3FAB7FABBFAD0 asmtab          fdb onebyte,twobyte,immbyte,lea
+FA99  FAF6FB09FB1CFB23                 fdb sbranch,lbranch,lbra,acc8
+FAA1  FB34FB45FB58FB7A                 fdb dreg1,dreg2,oneaddr,tfrexg
+FAA9  FBA3029B                        fdb pushpul,pseudovec
+                      
+FAAD  E7A0            putbyte         stb ,y+
+FAAF  39                              rts
+FAB0  EDA1            putword         std ,y++
+FAB2  39                              rts
+                      
+FAB3  E647            onebyte         ldb 7,u         ;Cat 0, one byte opcode w/o operands RTS
+FAB5  20F6                            bra putbyte
+FAB7  EC46            twobyte         ldd 6,u         ;Cat 1, two byte opcode w/o operands SWI2
+FAB9  20F5                            bra putword
+FABB  E647            immbyte         ldb 7,u         ;Cat 2, opcode w/ immdiate operand ANDCC
+FABD  8DEE                            bsr putbyte
+FABF  BDFC61                          jsr scanops
+FAC2  F602D4                          ldb amode
+FAC5  C101                            cmpb #1
+FAC7  102603FF                        lbne moderr
+FACB  F602D6                          ldb operand+1
+FACE  20DD                            bra putbyte
+FAD0  E647            lea             ldb 7,u         ;Cat 3, LEA
+FAD2  8DD9                            bsr putbyte
+FAD4  BDFC61                          jsr scanops
+FAD7  B602D4                          lda amode
+FADA  8101                            cmpa #1
+FADC  102703EA                        lbeq moderr     ;No immediate w/ lea
+FAE0  8103                            cmpa #3
+FAE2  10240333                        lbhs doaddr
+FAE6  BDFE0C                          jsr set3
+FAE9  868F                            lda #$8f
+FAEB  B702D3                          sta postbyte
+FAEE  8602                            lda #2
+FAF0  B702DC                          sta opsize      ;Use 8F nn nn for direct mode.  
+FAF3  7EFE19                          jmp doaddr
+FAF6  E647            sbranch         ldb 7,u         ;Cat 4, short branch instructions
+FAF8  8DB3                            bsr putbyte
+FAFA  BDFC59                          jsr startop
+FAFD  301F                            leax -1,x
+FAFF  BD0295                          jsr exprvec
+FB02  102703BE                        lbeq exprerr
+FB06  7EFE82                          jmp shortrel
+FB09  EC46            lbranch         ldd 6,u         ;Cat 5, long brach w/ two byte opcode
+FB0B  8DA3                            bsr putword
+FB0D  BDFC59          lbra1           jsr startop
+FB10  301F                            leax -1,x
+FB12  BD0295                          jsr exprvec
+FB15  102703AB                        lbeq exprerr
+FB19  7EFEA6                          jmp longrel             
+FB1C  E647            lbra            ldb 7,u         ;Cat 6, long branch w/ one byte opcode.
+FB1E  BDFAAD                          jsr putbyte
+FB21  20EA                            bra lbra1
+FB23  8601            acc8            lda #1          ;Cat 7, 8-bit two operand instructions ADDA
+FB25  B702DC                          sta opsize
+FB28  BDFC61                          jsr scanops
+FB2B  BDFC3F                          jsr adjopc
+FB2E  BDFAAD                          jsr putbyte
+FB31  7EFE19                          jmp doaddr
+FB34  8602            dreg1           lda #2          ;Cat 8, 16-bit 2operand insns 1byte opc LDX
+FB36  B702DC                          sta opsize
+FB39  BDFC61                          jsr scanops
+FB3C  BDFC3F                          jsr adjopc
+FB3F  BDFAAD                          jsr putbyte
+FB42  7EFE19                          jmp doaddr
+FB45  8602            dreg2           lda #2          ;Cat 9, 16-bit 2operand insns 2byte opc LDY
+FB47  B702DC                          sta opsize
+FB4A  BDFC61                          jsr scanops
+FB4D  BDFC3F                          jsr adjopc
+FB50  A646                            lda 6,u
+FB52  BDFAB0                          jsr putword
+FB55  7EFE19                          jmp doaddr
+FB58  BDFC61          oneaddr         jsr scanops     ;Cat 10, one-operand insns NEG..CLR
+FB5B  E647                            ldb 7,u
+FB5D  B602D4                          lda amode
+FB60  8101                            cmpa #1
+FB62  10270364                        lbeq moderr     ;No immediate mode
+FB66  8103                            cmpa #3
+FB68  2408                            bhs oaind       ;indexed etc
+FB6A  B602DC                          lda opsize
+FB6D  4A                              deca
+FB6E  2704                            beq oadir
+FB70  CB10                            addb #$10       ;Add $70 for extended direct.
+FB72  CB60            oaind           addb #$60       ;And $60 for indexed etc.
+FB74  BDFAAD          oadir           jsr putbyte     ;And nothing for direct8.
+FB77  7EFE19                          jmp doaddr
+FB7A  BDFC59          tfrexg          jsr startop     ;Cat 11, TFR and EXG
+FB7D  301F                            leax -1,x
+FB7F  E647                            ldb 7,u
+FB81  BDFAAD                          jsr putbyte
+FB84  BDFEE2                          jsr findreg
+FB87  E6C4                            ldb ,u
+FB89  58                              aslb 
+FB8A  58                              aslb
+FB8B  58                              aslb
+FB8C  58                              aslb
+FB8D  F702D3                          stb postbyte
+FB90  E680                            ldb ,x+
+FB92  C12C                            cmpb #','
+FB94  10260332                        lbne moderr
+FB98  BDFEE2                          jsr findreg
+FB9B  E6C4                            ldb ,u
+FB9D  FA02D3                          orb postbyte
+FBA0  7EFAAD                          jmp putbyte
+FBA3  BDFC59          pushpul         jsr startop     ;Cat 12, PSH and PUL
+FBA6  301F                            leax -1,x
+FBA8  E647                            ldb 7,u
+FBAA  BDFAAD                          jsr putbyte
+FBAD  7F02D3                          clr postbyte
+FBB0  BDFEE2          pploop          jsr findreg
+FBB3  E641                            ldb 1,u
+FBB5  FA02D3                          orb postbyte
+FBB8  F702D3                          stb postbyte
+FBBB  E680                            ldb ,x+
+FBBD  C12C                            cmpb #','
+FBBF  27EF                            beq pploop
+FBC1  301F                            leax -1,x
+FBC3  F602D3                          ldb postbyte
+FBC6  7EFAAD                          jmp putbyte
+FBC9  E647            pseudo          ldb 7,u         ;Cat 13, pseudo oeprations
+FBCB  58                              aslb
+FBCC  8EFBD1                          ldx #pseudotab
+FBCF  6E95                            jmp [b,x]
+FBD1  FBF6FBE1FBF7FC0B pseudotab       fdb pseudoend,dofcb,dofcc,dofdb
+FBD9  FC21FC30FBF6FBF6                 fdb doorg,dormb,pseudoend,pseudoend
+FBE1  BDFC59          dofcb           jsr startop
+FBE4  301F                            leax -1,x
+FBE6  BD0295          fcbloop         jsr exprvec
+FBE9  102702D7                        lbeq exprerr
+FBED  BDFAAD                          jsr putbyte
+FBF0  E680                            ldb ,x+
+FBF2  C12C                            cmpb #','
+FBF4  27F0                            beq fcbloop
+FBF6  39              pseudoend       rts
+FBF7  BDFC59          dofcc           jsr startop
+FBFA  1F98                            tfr b,a ;Save delimiter.
+FBFC  E680            fccloop         ldb ,x+
+FBFE  27F6                            beq pseudoend
+FC00  3402                            pshs a
+FC02  E1E0                            cmpb ,s+
+FC04  27F0                            beq pseudoend
+FC06  BDFAAD                          jsr putbyte
+FC09  20F1                            bra fccloop
+FC0B  BDFC59          dofdb           jsr startop
+FC0E  301F                            leax -1,x
+FC10  BD0295          fdbloop         jsr exprvec
+FC13  102702AD                        lbeq exprerr
+FC17  BDFAB0                          jsr putword
+FC1A  E680                            ldb ,x+
+FC1C  C12C                            cmpb #','
+FC1E  27F0                            beq fdbloop
+FC20  39                              rts
+FC21  BDFC59          doorg           jsr startop
+FC24  301F                            leax -1,x
+FC26  BD0295                          jsr exprvec
+FC29  10270297                        lbeq exprerr
+FC2D  1F02                            tfr d,y
+FC2F  39                              rts
+FC30  BDFC59          dormb           jsr startop
+FC33  301F                            leax -1,x
+FC35  BD0295                          jsr exprvec
+FC38  10270288                        lbeq exprerr
+FC3C  31AB                            leay d,y
+FC3E  39                              rts
+                      
+                      
+                      * Adjust opcdoe depending on mode (in $80-$FF range)
+FC3F  E647            adjopc          ldb 7,u
+FC41  B602D4                          lda amode
+FC44  8102                            cmpa #2
+FC46  2708                            beq adjdir      ;Is it direct?
+FC48  8103                            cmpa #3
+FC4A  2401                            bhs adjind      ;Indexed etc?
+FC4C  39                              rts             ;Not, then immediate, no adjust.
+FC4D  CB20            adjind          addb #$20       ;Add $20 to opcode for indexed etc modes.
+FC4F  39                              rts
+FC50  CB10            adjdir          addb #$10       ;Add $10 to opcode for direct8
+FC52  B602DC                          lda opsize
+FC55  4A                              deca
+FC56  26F5                            bne adjind      ;If opsize=2, add another $20 for extended16
+FC58  39                              rts
+                      
+                      * Start scanning of operands.
+FC59  9E28            startop         ldx temp3
+FC5B  7F02D4                          clr amode
+FC5E  7EE984                          jmp skipspace
+                      
+                      * amode settings in assembler: 1=immediate, 2=direct/extended, 3=indexed
+                      * etc. 4=pc relative, 5=indirect, 6=pcrelative and indirect.
+                      
+                      * This subroutine scans the assembler operands.
+FC61  8DF6            scanops         bsr startop
+FC63  C15B                            cmpb #'['
+FC65  2607                            bne noindir
+FC67  8605                            lda #5          ;operand starts with [, then indirect.
+FC69  B702D4                          sta amode
+FC6C  E680                            ldb ,x+
+FC6E  C123            noindir         cmpb #'#'
+FC70  10270087                        lbeq doimm
+FC74  C12C                            cmpb #','
+FC76  1027009A                        lbeq dospecial
+FC7A  C4DF                            andb #CASEMASK    ;Convert to uppercase.
+FC7C  8686                            lda #$86
+FC7E  C141                            cmpb #'A'
+FC80  270C                            beq scanacidx
+FC82  8685                            lda #$85
+FC84  C142                            cmpb #'B'
+FC86  2706                            beq scanacidx
+FC88  868B                            lda #$8B
+FC8A  C144                            cmpb #'D'
+FC8C  2616                            bne scanlab
+FC8E  E680            scanacidx       ldb ,x+         ;Could it be A,X B,X or D,X
+FC90  C12C                            cmpb #','
+FC92  260E                            bne nocomma
+FC94  B702D3                          sta postbyte
+FC97  7F02DC                          clr opsize
+FC9A  BDFE0C                          jsr set3
+FC9D  BDFDEE                          jsr scanixreg
+FCA0  2041                            bra scanend
+FCA2  301F            nocomma         leax -1,x               
+FCA4  301F            scanlab         leax -1,x       ;Point to the start of the operand
+FCA6  BD0295                          jsr exprvec
+FCA9  10270217                        lbeq exprerr    
+FCAD  FD02D5                          std operand
+FCB0  7D02DD                          tst uncert
+FCB3  2609                            bne opsz2       ;Go for extended if operand unknown.
+FCB5  B302DE                          subd dpsetting  
+FCB8  4D                              tsta            ;Can we use 8-bit operand?
+FCB9  2603                            bne opsz2
+FCBB  4C                              inca
+FCBC  2002                            bra opsz1
+FCBE  8602            opsz2           lda #2
+FCC0  B702DC          opsz1           sta opsize      ;Set opsize depending on magnitude of op.
+FCC3  B602D4                          lda amode
+FCC6  8105                            cmpa #5
+FCC8  260C                            bne opsz3       ;Or was it indirect.
+FCCA  8602                            lda #2          ;Then we have postbyte and opsize=2
+FCCC  B702DC                          sta opsize
+FCCF  868F                            lda #$8F
+FCD1  B702D3                          sta postbyte
+FCD4  2005                            bra opsz4
+FCD6  8602            opsz3           lda #2
+FCD8  B702D4                          sta amode       ;Assume direct or absolute addressing 
+FCDB  E680            opsz4           ldb ,x+
+FCDD  C12C                            cmpb #','
+FCDF  10270086                        lbeq doindex    ;If followed by, then indexed.
+FCE3  B602D4          scanend         lda amode
+FCE6  8105                            cmpa #5
+FCE8  2510                            blo scanend2    ;Was it an indirect mode?
+FCEA  B602D3                          lda postbyte
+FCED  8A10                            ora #$10        ;Set indirect bit.
+FCEF  B702D3                          sta postbyte
+FCF2  E680                            ldb ,x+
+FCF4  C15D                            cmpb #']'       ;Check for the other ]
+FCF6  102701D0                        lbeq moderr
+FCFA  39              scanend2        rts
+FCFB  BD0295          doimm           jsr exprvec     ;Immediate addressing.  
+FCFE  102701C2                        lbeq exprerr
+FD02  FD02D5                          std operand
+FD05  B602D4                          lda amode
+FD08  8105                            cmpa #5
+FD0A  102701BC                        lbeq moderr     ;Inirect mode w/ imm is illegal.
+FD0E  8601                            lda #$01
+FD10  B702D4                          sta amode
+FD13  39                              rts
+FD14  BDFE0C          dospecial       jsr set3
+FD17  7F02DC                          clr opsize
+FD1A  4F                              clra
+FD1B  E680            adecloop        ldb ,x+
+FD1D  C12D                            cmpb #'-'
+FD1F  2603                            bne adecend
+FD21  4C                              inca            ;Count the - signs for autodecrement.
+FD22  20F7                            bra adecloop
+FD24  301F            adecend         leax -1,x
+FD26  8102                            cmpa #2
+FD28  1022019E                        lbhi moderr
+FD2C  4D                              tsta
+FD2D  262F                            bne autodec
+FD2F  7F02D3                          clr postbyte
+FD32  BDFDEE                          jsr scanixreg
+FD35  4F                              clra
+FD36  E680            aincloop        ldb ,x+
+FD38  C12B                            cmpb #'+'
+FD3A  2603                            bne aincend
+FD3C  4C                              inca
+FD3D  20F7                            bra aincloop    ;Count the + signs for autoincrement.
+FD3F  301F            aincend         leax -1,x
+FD41  8102                            cmpa #2
+FD43  10220183                        lbhi moderr
+FD47  4D                              tsta
+FD48  260A                            bne autoinc
+FD4A  8684                            lda #$84
+FD4C  BA02D3                          ora postbyte
+FD4F  B702D3                          sta postbyte
+FD52  208F                            bra scanend
+FD54  8B7F            autoinc         adda #$7f
+FD56  BA02D3                          ora postbyte
+FD59  B702D3                          sta postbyte
+FD5C  2085                            bra scanend
+FD5E  8B81            autodec         adda #$81
+FD60  B702D3                          sta postbyte
+FD63  BDFDEE                          jsr scanixreg
+FD66  16FF7A                          lbra scanend
+FD69  7F02D3          doindex         clr postbyte
+FD6C  BDFE0C                          jsr set3
+FD6F  E680                            ldb ,x+
+FD71  C4DF                            andb #CASEMASK  ;Convert to uppercase.
+FD73  C150                            cmpb #'P'
+FD75  10270057                        lbeq dopcrel    ;Check for PC relative.
+FD79  301F                            leax -1,x
+FD7B  7F02DC                          clr opsize
+FD7E  8D6E                            bsr scanixreg
+FD80  FC02D5                          ldd operand
+FD83  7D02DD                          tst uncert
+FD86  2638                            bne longindex   ;Go for long index if operand unknown.
+FD88  1083FFF0                        cmpd #-16
+FD8C  2D18                            blt shortindex
+FD8E  1083000F                        cmpd #15
+FD92  2E12                            bgt shortindex
+FD94  B602D4                          lda amode
+FD97  8105                            cmpa #5         
+FD99  2717                            beq shortind1   ;Indirect may not be 5-bit index
+                                                      ;It's a five-bit index.
+FD9B  C41F                            andb #$1f
+FD9D  FA02D3                          orb postbyte
+FDA0  F702D3                          stb postbyte
+FDA3  16FF3D                          lbra scanend
+FDA6  1083FF80        shortindex      cmpd #-128
+FDAA  2D14                            blt longindex
+FDAC  1083007F                        cmpd #127
+FDB0  2E0E                            bgt longindex
+FDB2  7C02DC          shortind1       inc opsize
+FDB5  C688                            ldb #$88
+FDB7  FA02D3                          orb postbyte
+FDBA  F702D3                          stb postbyte
+FDBD  16FF23                          lbra scanend
+FDC0  8602            longindex       lda #$2
+FDC2  B702DC                          sta opsize
+FDC5  C689                            ldb #$89
+FDC7  FA02D3                          orb postbyte
+FDCA  F702D3                          stb postbyte
+FDCD  16FF13                          lbra scanend
+FDD0  E680            dopcrel         ldb ,x+
+FDD2  C4DF                            andb #CASEMASK  ;Convert to uppercase
+FDD4  C143                            cmpb #'C'
+FDD6  2506                            blo pcrelend
+FDD8  C152                            cmpb #'R'
+FDDA  2202                            bhi pcrelend
+FDDC  20F2                            bra dopcrel     ;Scan past the ,PCR 
+FDDE  301F            pcrelend        leax -1,x
+FDE0  C68C                            ldb #$8C
+FDE2  FA02D3                          orb postbyte    ;Set postbyte
+FDE5  F702D3                          stb postbyte    
+FDE8  7C02D4                          inc amode       ;Set addr mode to PCR
+FDEB  16FEF5                          lbra scanend
+                      
+                      * Scan for one of the 4 index registers and adjust postbyte. 
+FDEE  E680            scanixreg       ldb ,x+
+FDF0  C4DF                            andb #CASEMASK  ;Convert to uppercase.
+FDF2  3410                            pshs x
+FDF4  8EF632                          ldx #ixregs
+FDF7  4F                              clra
+FDF8  E180            scidxloop       cmpb ,x+
+FDFA  2707                            beq ixfound
+FDFC  8B20                            adda #$20
+FDFE  2AF8                            bpl scidxloop
+FE00  7EFECA                          jmp moderr      ;Index register not found where expected.
+FE03  BA02D3          ixfound         ora postbyte
+FE06  B702D3                          sta postbyte    ;Set index reg bits in postbyte.
+FE09  3510                            puls x
+FE0B  39                              rts
+                      
+                      * This routine sets amode to 3, if it was less.
+FE0C  B602D4          set3            lda amode
+FE0F  8103                            cmpa #3
+FE11  2405                            bhs set3a
+FE13  8603                            lda #3
+FE15  B702D4                          sta amode
+FE18  39              set3a           rts
+                      
+                      * This subroutine lays down the address.
+FE19  B602D4          doaddr          lda amode
+FE1C  8103                            cmpa #3
+FE1E  250D                            blo doa1
+FE20  F602D3                          ldb postbyte
+FE23  BDFAAD                          jsr putbyte
+FE26  B602D4                          lda amode 
+FE29  8401                            anda #1
+FE2B  2715                            beq doapcrel    ;pc rel modes.
+FE2D  B602DC          doa1            lda opsize
+FE30  4D                              tsta
+FE31  27E5                            beq set3a
+FE33  4A                              deca
+FE34  2706                            beq doa2
+FE36  FC02D5                          ldd operand
+FE39  7EFAB0                          jmp putword
+FE3C  F602D6          doa2            ldb operand+1
+FE3F  7EFAAD                          jmp putbyte             
+FE42  10BF02A0        doapcrel        sty addr
+FE46  FC02D5                          ldd operand
+FE49  B302A0                          subd addr
+FE4C  830001                          subd #1
+FE4F  7D02DD                          tst uncert
+FE52  2614                            bne pcrlong
+FE54  1083FF80                        cmpd #-128
+FE58  2D0E                            blt pcrlong
+FE5A  1083FF81                        cmpd #-127
+FE5E  2E08                            bgt pcrlong
+FE60  8601                            lda #1
+FE62  B702DC                          sta opsize
+FE65  7EFAAD                          jmp putbyte
+FE68  830001          pcrlong         subd #1
+FE6B  313F                            leay -1,y
+FE6D  7C02D3                          inc postbyte
+FE70  3406                            pshs d
+FE72  F602D3                          ldb postbyte
+FE75  BDFAAD                          jsr putbyte
+FE78  8602                            lda #2
+FE7A  B702DC                          sta opsize
+FE7D  3506                            puls d
+FE7F  7EFAB0                          jmp putword
+                      
+                      * This routine checks and lays down short relative address.
+FE82  10BF02A0        shortrel        sty addr
+FE86  B302A0                          subd addr
+FE89  830001                          subd #1
+FE8C  1083FF80                        cmpd #-128
+FE90  2D2C                            blt brerr
+FE92  1083007F                        cmpd #127
+FE96  2E26                            bgt brerr
+FE98  BDFAAD                          jsr putbyte
+FE9B  8604                            lda #4
+FE9D  B702D4                          sta amode
+FEA0  8601                            lda #1
+FEA2  B702DC                          sta opsize
+FEA5  39                              rts
+                      * This routine lays down long relative address.
+FEA6  10BF02A0        longrel         sty addr
+FEAA  B302A0                          subd addr
+FEAD  830002                          subd #2
+FEB0  BDFAB0                          jsr putword
+FEB3  8604                            lda #4
+FEB5  B702D4                          sta amode
+FEB8  8602                            lda #2
+FEBA  B702DC                          sta opsize
+FEBD  39                              rts
+                      
+FEBE  8EE952          brerr           ldx #brmsg
+FEC1  7E0298                          jmp asmerrvec 
+FEC4  8EE92B          exprerr         ldx #exprmsg
+FEC7  7E0298                          jmp asmerrvec
+FECA  8EE93C          moderr          ldx #modemsg
+FECD  7E0298                          jmp asmerrvec
+FED0  3410            asmerr          pshs x
+FED2  9D18                            jsr xabortin
+FED4  3510                            puls x
+FED6  BDE507                          jsr outcount
+FED9  9D0C                            jsr putcr
+FEDB  10FE02CC                        lds savesp
+FEDF  7EE581                          jmp cmdline
+                      
+                      * Find register for TFR and PSH instruction
+FEE2  C60C            findreg         ldb #12
+FEE4  3424                            pshs y,b
+FEE6  CEF5F3                          ldu #asmregtab
+FEE9  1F12            findregloop     tfr x,y
+FEEB  8603                            lda #3
+FEED  E6C4            frcmps          ldb ,u
+FEEF  C120                            cmpb #' '
+FEF1  2606                            bne frcmps1
+FEF3  E6A4                            ldb ,y
+FEF5  C141                            cmpb #'A'
+FEF7  2D18                            blt frfound
+FEF9  E6A0            frcmps1         ldb ,y+
+FEFB  C4DF                            andb #CASEMASK
+FEFD  E1C0                            cmpb ,u+
+FEFF  2606                            bne frnextreg
+FF01  4A                              deca
+FF02  26E9                            bne frcmps
+FF04  4C                              inca
+FF05  200A                            bra frfound
+FF07  4C              frnextreg       inca
+FF08  33C6                            leau a,u
+FF0A  6AE4                            dec ,s
+FF0C  26DB                            bne findregloop
+FF0E  16FFB9                          lbra moderr
+FF11  33C6            frfound         leau a,u
+FF13  1F21                            tfr y,x
+FF15  3524                            puls y,b
+FF17  39                              rts
+                      
+                      * This is the code for the A command, assemble instructions.
+                      * Syntax: Aaddr
+FF18  8E0201          asm             ldx #linebuf+1
+FF1B  BDE9AC                          jsr scanhex
+FF1E  FD02A0                          std addr
+FF21  0C32                            inc disflg
+                      
+                      
+FF23  108E0000        asmloop         ldy #0
+FF27  10BF02A2                        sty length
+FF2B  FC02A0                          ldd addr
+FF2E  3406                            pshs d
+FF30  BDF94A                          jsr dis1        ;display unassembled line
+FF33  FC02A0                          ldd addr
+FF36  FD02CE                          std nxtadd
+                      
+FF39  3506                            puls d
+FF3B  FD02A0                          std addr
+                      
+                      *               ldd addr
+                      *               jsr outd
+                      
+FF3E  C609                            ldb #TAB
+FF40  9D03                            jsr putchar     ;Print TAB
+FF42  8E0200                          ldx #linebuf
+FF45  C680                            ldb #128
+FF47  9D06                            jsr getline     ;Get new line
+FF49  5D                              tstb    
+FF4A  2711                            beq next
+                      
+                      ***             beq asmend      ;Exit on empty line.
+FF4C  3A                              abx 
+FF4D  6F84                            clr ,x          ;Make line zero terminated.
+FF4F  8E0200                          ldx #linebuf
+FF52  A684                            lda ,x
+FF54  812E                            cmpa #'.'
+FF56  270D                            beq asmend
+FF58  BDFA08                          jsr asminstr
+FF5B  20C6                            bra asmloop
+                      
+FF5D  FC02CE          next            ldd nxtadd
+FF60  FD02A0                          std addr
+FF63  20BE                            bra asmloop
+                      
+FF65  0F32            asmend          clr disflg
+FF67  7EE581                          jmp cmdline
+                      
+                      * Jump table for monitor routines that are usable by other programs.
+FFC0                                  org $ffc0
+FFC0  7EE96D                          jmp outbyte
+FFC3  7EE97B                          jmp outd
+FFC6  7EE9E7                          jmp scanbyte
+FFC9  7EE9AC                          jmp scanhex
+FFCC  7EF9B8                          jmp scanfact
+FFCF  7EFA08                          jmp asminstr
+                      
+                      * Interrupt vector addresses at top of ROM. Most are vectored through jumps
+                      * in RAM.
+FFF2                                  org $fff2
+FFF2  0280                            fdb swi3vec
+FFF4  0283                            fdb swi2vec
+FFF6  0286                            fdb firqvec
+FFF8  0289                            fdb irqvec
+FFFA  028C                            fdb swivec
+FFFC  028F                            fdb nmivec
+FFFE  E400                            fdb reset
+                      
+0000                                  end
