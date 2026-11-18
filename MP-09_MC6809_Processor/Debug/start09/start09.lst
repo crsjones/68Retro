@@ -1,0 +1,23 @@
+                      ;
+                      ; 6x09 GOTTA START SOMEWHERE
+                      ;
+FFE0                          ORG  $FFE0
+                      ;
+                      ; READ FROM I/O ADDRESS
+                      ;
+FFE0  B6E000          START   LDA  $E000      ;LOAD FROM IO PAGE $E000 - #E0FF
+FFE3  20FB                    BRA  START
+                      
+                      *----------------------
+                      * 6x09 HARDWARE VECTORS
+                      *----------------------
+FFF0                         ORG    $FFF0
+FFF0  FFE0                   FDB    START     ;ERROR TRAP / RESERVED
+FFF2  FFE0                   FDB    START     ;SOFTWARE INTERRUPT 3
+FFF4  FFE0                   FDB    START     ;SOFTWARE INTERRUPT 2
+FFF6  FFE0                   FDB    START     ;FAST INTERRUPT REQUEST
+FFF8  FFE0                   FDB    START     ;INTERRUPT REQUEST
+FFFA  FFE0                   FDB    START     ;SOFTWARE INTERRUPT 1
+FFFC  FFE0                   FDB    START     ;NON MASKABLE INTERRUPT
+FFFE  FFE0                   FDB    START     ;RESET
+0000                         END
